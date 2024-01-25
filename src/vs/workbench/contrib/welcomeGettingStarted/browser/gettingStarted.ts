@@ -81,6 +81,11 @@ const configurationKey = 'workbench.startupEditor';
 export const allWalkthroughsHiddenContext = new RawContextKey<boolean>('allWalkthroughsHidden', false);
 export const inWelcomeContext = new RawContextKey<boolean>('inWelcome', false);
 
+/**
+ * Represents the Getting Started page in the VS Code editor.
+ * This page provides a guided tour and helpful resources for new users.
+ */
+
 export interface IWelcomePageStartEntry {
 	id: string;
 	title: string;
@@ -114,6 +119,7 @@ type GettingStartedActionEvent = {
 	walkthroughId: string | undefined;
 	argument: string | undefined;
 };
+
 
 type RecentEntry = (IRecentFolder | IRecentWorkspace) & { id: string };
 
