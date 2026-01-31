@@ -380,7 +380,7 @@ export class InlineSuggestData {
 	public async reportInlineEditShown(commandService: ICommandService, updatedInsertText: string, viewKind: InlineCompletionViewKind, viewData: InlineCompletionViewData, editKind: InlineSuggestionEditKind | undefined, timeWhenShown: number): Promise<void> {
 		this.updateShownDuration(viewKind);
 
-		if (this._didShow) {
+		if (this._didShow || this._didReportEndOfLife) {
 			return;
 		}
 		this.addPerformanceMarker('shown');
@@ -429,6 +429,12 @@ export class InlineSuggestData {
 			reason = this._lastSetEndOfLifeReason ?? { kind: InlineCompletionEndOfLifeReasonKind.Ignored, userTypingDisagreed: false, supersededBy: undefined };
 		}
 
+		// A suggestion can only be "rejected" if it was actually shown to the user.
+		// If the suggestion was never shown, downgrade to "ignored".
+		if (reason.kind === InlineCompletionEndOfLifeReasonKind.Rejected && !this._didShow) {
+			reason = { kind: InlineCompletionEndOfLifeReasonKind.Ignored, userTypingDisagreed: false, supersededBy: undefined };
+		}
+
 		if (reason.kind === InlineCompletionEndOfLifeReasonKind.Rejected && this.source.provider.handleRejection) {
 			this.source.provider.handleRejection(this.source.inlineSuggestions, this.sourceInlineCompletion);
 		}
@@ -457,9 +463,9 @@ export class InlineSuggestData {
 				viewKind: this._viewData.viewKind,
 				notShownReason: this._notShownReason,
 				performanceMarkers: this.performance.toString(),
-				renameCreated: this._renameInfo?.createdRename ?? false,
+				renameCreated: this._renameInfo?.createdRename,
 				renameDuration: this._renameInfo?.duration,
-				renameTimedOut: this._renameInfo?.timedOut ?? false,
+				renameTimedOut: this._renameInfo?.timedOut,
 				renameDroppedOtherEdits: this._renameInfo?.droppedOtherEdits,
 				renameDroppedRenameEdits: this._renameInfo?.droppedRenameEdits,
 				typingInterval: this._requestInfo.typingInterval,

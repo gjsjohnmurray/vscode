@@ -178,7 +178,6 @@ export interface ITerminalConfiguration {
 	environmentChangesRelaunch: boolean;
 	showExitAlert: boolean;
 	splitCwd: 'workspaceRoot' | 'initial' | 'inherited';
-	windowsEnableConpty: boolean;
 	windowsUseConptyDll?: boolean;
 	wordSeparators: string;
 	enableFileLinks: 'off' | 'on' | 'notRemote';
@@ -208,6 +207,8 @@ export interface ITerminalConfiguration {
 	smoothScrolling: boolean;
 	ignoreBracketedPasteMode: boolean;
 	rescaleOverlappingGlyphs: boolean;
+	enableKittyKeyboardProtocol: boolean;
+	enableWin32InputMode: boolean;
 	fontLigatures?: {
 		enabled: boolean;
 		featureSettings: string;
@@ -547,6 +548,7 @@ export const DEFAULT_COMMANDS_TO_SKIP_SHELL: string[] = [
 	TerminalCommandId.FocusHover,
 	AccessibilityCommandId.OpenAccessibilityHelp,
 	TerminalCommandId.StopVoice,
+	TerminalCommandId.SendSignal,
 	'workbench.action.tasks.rerunForActiveTerminal',
 	'editor.action.toggleTabFocusMode',
 	'notifications.hideList',
