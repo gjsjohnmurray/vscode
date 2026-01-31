@@ -14,8 +14,8 @@ import { IConfigurationService } from '../../../../platform/configuration/common
 import { FocusMode } from '../../../../platform/native/common/native.js';
 import { IWorkbenchContribution } from '../../../common/contributions.js';
 import { IHostService } from '../../../services/host/browser/host.js';
-import { IChatModel, IChatRequestNeedsInputInfo } from '../common/chatModel.js';
-import { IChatService } from '../common/chatService.js';
+import { IChatModel, IChatRequestNeedsInputInfo } from '../common/model/chatModel.js';
+import { IChatService } from '../common/chatService/chatService.js';
 import { IChatWidgetService } from './chat.js';
 
 /**
@@ -69,6 +69,18 @@ export class ChatWindowNotifier extends Disposable implements IWorkbenchContribu
 	private async _notifyIfNeeded(sessionResource: URI, info: IChatRequestNeedsInputInfo): Promise<void> {
 		// Check configuration
 		if (!this._configurationService.getValue<boolean>('chat.notifyWindowOnConfirmation')) {
+			return;
+		}
+
+		// Wait a microtask to allow any synchronous auto-confirmations to complete.
+		// This prevents notifications for tools that briefly enter WaitingForConfirmation
+		// state before being auto-confirmed through various mechanisms (per-session rules,
+		// per-workspace rules, etc.)
+		await Promise.resolve();
+
+		// Re-check that the model still needs input after the microtask delay
+		const model = this._chatService.getSession(sessionResource);
+		if (!model?.requestNeedsInput.get()) {
 			return;
 		}
 
