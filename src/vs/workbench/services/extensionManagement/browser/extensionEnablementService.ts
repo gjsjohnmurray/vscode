@@ -231,7 +231,8 @@ export class ExtensionEnablementService extends Disposable implements IWorkbench
 		if (isAuthenticationProviderExtension(extension.manifest)) {
 			this.instantiationService.invokeFunction(accessor => {
 				const extensionService = accessor.get(IExtensionService);
-				if (extensionService.getExtensionsStatus()[extension.identifier.id]?.activationTimes) {
+				const status = extensionService.getExtensionsStatus()[extension.identifier.id];
+				if (status?.activationStarted || status?.activationTimes) {
 					throw new Error(localize('cannot disable active auth extension in workspace', "Cannot change enablement of {0} extension in workspace because it contributes authentication providers and is already active", extension.manifest.displayName || extension.identifier.id));
 				}
 			});
