@@ -10,12 +10,10 @@ import { Checkbox } from '../../../../../base/browser/ui/toggle/toggle.js';
 import { Disposable, DisposableStore, MutableDisposable } from '../../../../../base/common/lifecycle.js';
 import { onUnexpectedError } from '../../../../../base/common/errors.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
-import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { autorun } from '../../../../../base/common/observable.js';
-import { basename, isEqual, isEqualOrParent } from '../../../../../base/common/resources.js';
+import { isEqual } from '../../../../../base/common/resources.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
-import { ResourceMap } from '../../../../../base/common/map.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { localize } from '../../../../../nls.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
@@ -47,18 +45,13 @@ import { getDefaultHoverDelegate } from '../../../../../base/browser/ui/hover/ho
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { IPathService } from '../../../../services/path/common/pathService.js';
 import { generateCustomizationDebugReport } from './aiCustomizationDebugPanel.js';
-import { extractExtensionIdFromPath, getCustomizationSecondaryText } from './aiCustomizationListWidgetUtils.js';
-import { parseHooksFromFile } from '../../common/promptSyntax/hookCompatibility.js';
-import { formatHookCommandLabel } from '../../common/promptSyntax/hookSchema.js';
-import { HOOK_METADATA } from '../../common/promptSyntax/hookTypes.js';
-import { parse as parseJSONC } from '../../../../../base/common/json.js';
-import { Schemas } from '../../../../../base/common/network.js';
-import { OS } from '../../../../../base/common/platform.js';
+import { getCustomizationSecondaryText } from './aiCustomizationListWidgetUtils.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
-import { ICustomizationHarnessService, IExternalCustomizationItem, IExternalCustomizationItemProvider, ICustomizationSyncProvider } from '../../common/customizationHarnessService.js';
-import { ExtensionIdentifier } from '../../../../../platform/extensions/common/extensions.js';
+import { ICustomizationHarnessService } from '../../common/customizationHarnessService.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IProductService } from '../../../../../platform/product/common/productService.js';
+import { AICustomizationItemNormalizer, IAICustomizationItemSource, IAICustomizationListItem, ProviderCustomizationItemSource } from './aiCustomizationItemSource.js';
+import { PromptsServiceCustomizationItemProvider } from './promptsServiceCustomizationItemProvider.js';
 
 export { truncateToFirstLine } from './aiCustomizationListWidgetUtils.js';
 
@@ -75,7 +68,7 @@ type CustomizationEditorSearchClassification = {
 	section: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; comment: 'The active section when the search was performed.' };
 	resultCount: { classification: 'SystemMetaData'; purpose: 'FeatureInsight'; isMeasurement: true; comment: 'The number of items matching the search query.' };
 	owner: 'joshspicer';
-	comment: 'Tracks search usage in the Chat Customizations editor.';
+	comment: 'Tracks search usage in the Agent Customizations editor.';
 };
 
 //#endregion
@@ -83,43 +76,6 @@ type CustomizationEditorSearchClassification = {
 const ITEM_HEIGHT = 44;
 const GROUP_HEADER_HEIGHT = 36;
 const GROUP_HEADER_HEIGHT_WITH_SEPARATOR = 40;
-
-/**
- * Represents an AI customization item in the list.
- */
-export interface IAICustomizationListItem {
-	readonly id: string;
-	readonly uri: URI;
-	readonly name: string;
-	readonly filename: string;
-	readonly description?: string;
-	/** Storage origin. Set by core when items come from promptsService; omitted for external provider items. */
-	readonly storage?: PromptsStorage;
-	readonly promptType: PromptsType;
-	readonly disabled: boolean;
-	/** When set, overrides `storage` for display grouping purposes. */
-	readonly groupKey?: string;
-	/** URI of the parent plugin, when this item comes from an installed plugin. */
-	readonly pluginUri?: URI;
-	/** When set, overrides the formatted name for display. */
-	readonly displayName?: string;
-	/** When set, shows a small inline badge next to the item name. */
-	readonly badge?: string;
-	/** Tooltip shown when hovering the badge. */
-	readonly badgeTooltip?: string;
-	/** When set, overrides the default prompt-type icon. */
-	readonly typeIcon?: ThemeIcon;
-	/** Server-reported loading/sync status for remote customizations. */
-	readonly status?: 'loading' | 'loaded' | 'degraded' | 'error';
-	/** Human-readable status detail (e.g. error message or warning). */
-	readonly statusMessage?: string;
-	/** When true, this item can be selected for syncing to a remote harness. */
-	readonly syncable?: boolean;
-	/** When true, this syncable item is currently selected for syncing. */
-	readonly synced?: boolean;
-	nameMatches?: IMatch[];
-	descriptionMatches?: IMatch[];
-}
 
 /**
  * Represents a collapsible group header in the list.
@@ -355,9 +311,16 @@ class AICustomizationItemRenderer implements IListRenderer<IFileItemEntry, IAICu
 
 		// Hover tooltip: name + source + badge context + plugin source
 		templateData.elementDisposables.add(this.hoverService.setupDelayedHover(templateData.container, () => {
-			const isWorkspaceItem = element.storage === PromptsStorage.local;
-			const uriLabel = this.labelService.getUriLabel(element.uri, { relative: isWorkspaceItem });
-			let content = `${element.name}\n${uriLabel}`;
+			let content: string;
+			if (element.isBuiltin) {
+				content = `${element.name}\n${localize('builtinSource', "Built-in")}`;
+			} else if (element.extensionLabel) {
+				content = `${element.name}\n${localize('fromExtension', "Extension: {0}", element.extensionLabel)}`;
+			} else {
+				const isWorkspaceItem = element.storage === PromptsStorage.local;
+				const uriLabel = this.labelService.getUriLabel(element.uri, { relative: isWorkspaceItem });
+				content = `${element.name}\n${uriLabel}`;
+			}
 			if (element.badgeTooltip) {
 				content += `\n\n${element.badgeTooltip}`;
 			}
@@ -566,6 +529,9 @@ export class AICustomizationListWidget extends Disposable {
 	private _loadItemsSeq = 0;
 
 	private readonly delayedFilter = new Delayer<void>(200);
+	private readonly itemNormalizer: AICustomizationItemNormalizer;
+	private readonly promptsServiceItemProvider: PromptsServiceCustomizationItemProvider;
+	private cachedItemSource: { descriptorId: string; source: IAICustomizationItemSource } | undefined;
 
 	private readonly _onDidSelectItem = this._register(new Emitter<IAICustomizationListItem>());
 	readonly onDidSelectItem: Event<IAICustomizationListItem> = this._onDidSelectItem.event;
@@ -601,6 +567,19 @@ export class AICustomizationListWidget extends Disposable {
 		@IProductService private readonly productService: IProductService,
 	) {
 		super();
+		this.itemNormalizer = new AICustomizationItemNormalizer(
+			this.workspaceContextService,
+			this.workspaceService,
+			this.labelService,
+			this.agentPluginService,
+			this.productService,
+		);
+		this.promptsServiceItemProvider = new PromptsServiceCustomizationItemProvider(
+			() => this.harnessService.getActiveDescriptor(),
+			this.promptsService,
+			this.workspaceService,
+			this.productService,
+		);
 		this.element = $('.ai-customization-list-widget');
 		this.create();
 
@@ -624,27 +603,18 @@ export class AICustomizationListWidget extends Disposable {
 			this.refresh();
 		}));
 
-		// Subscribe to the active provider's onDidChange event.
+		// Subscribe to the active item source's onDidChange event.
 		// Read both activeHarness and availableHarnesses so that the
 		// subscription is re-established when a new provider harness
 		// registers (availableHarnesses changes) even if activeHarness
 		// was already set to the harness id from persisted state.
-		const providerChangeDisposable = this._register(new MutableDisposable());
-		const syncChangeDisposable = this._register(new MutableDisposable());
+		const itemSourceChangeDisposable = this._register(new MutableDisposable());
 		this._register(autorun(reader => {
 			this.harnessService.activeHarness.read(reader);
 			this.harnessService.availableHarnesses.read(reader);
+			this.cachedItemSource = undefined;
 			const activeDescriptor = this.harnessService.getActiveDescriptor();
-			if (activeDescriptor.itemProvider) {
-				providerChangeDisposable.value = activeDescriptor.itemProvider.onDidChange(() => this.refresh());
-			} else {
-				providerChangeDisposable.clear();
-			}
-			if (activeDescriptor.syncProvider) {
-				syncChangeDisposable.value = activeDescriptor.syncProvider.onDidChange(() => this.refresh());
-			} else {
-				syncChangeDisposable.clear();
-			}
+			itemSourceChangeDisposable.value = this.getItemSource(activeDescriptor).onDidChange(() => this.refresh());
 		}));
 
 	}
@@ -733,7 +703,7 @@ export class AICustomizationListWidget extends Disposable {
 							? localize('itemAriaLabelDisabled', "{0}, disabled", nameAndDesc)
 							: nameAndDesc;
 					},
-					getWidgetAriaLabel: () => localize('listAriaLabel', "Chat Customizations"),
+					getWidgetAriaLabel: () => localize('listAriaLabel', "Agent Customizations"),
 				},
 				keyboardNavigationLabelProvider: {
 					getKeyboardNavigationLabel: (entry: IListEntry) => entry.type === 'group-header' ? entry.label : entry.item.name,
@@ -756,12 +726,6 @@ export class AICustomizationListWidget extends Disposable {
 
 		// Handle context menu
 		this._register(this.list.onContextMenu(e => this.onContextMenu(e)));
-
-		// Subscribe to prompt service changes
-		this._register(this.promptsService.onDidChangeCustomAgents(() => this.refresh()));
-		this._register(this.promptsService.onDidChangeSlashCommands(() => this.refresh()));
-		this._register(this.promptsService.onDidChangeSkills(() => this.refresh()));
-		this._register(this.promptsService.onDidChangeInstructions(() => this.refresh()));
 
 		// Refresh on file deletions so the list updates after inline delete actions
 		this._register(this.fileService.onDidFilesChange(e => {
@@ -826,8 +790,8 @@ export class AICustomizationListWidget extends Disposable {
 
 		const { secondary } = getContextMenuActions(actions, 'inline');
 
-		// Add copy path actions
-		const copyActions = [
+		// Add copy path actions (not shown for built-in items where the path is an implementation detail)
+		const copyActions = item.isBuiltin ? [] : [
 			new Separator(),
 			new Action('copyFullPath', localize('copyFullPath', "Copy Full Path"), undefined, true, async () => {
 				await this.clipboardService.writeText(item.uri.fsPath);
@@ -1177,251 +1141,35 @@ export class AICustomizationListWidget extends Disposable {
 	}
 
 	/**
-	 * Returns true if the given extension identifier matches the default
-	 * chat extension (e.g. GitHub Copilot Chat). Used to group items from
-	 * the chat extension under "Built-in" instead of "Extensions", similar
-	 * to how MCP categorizes built-in servers.
-	 */
-	private isChatExtensionItem(extensionId: ExtensionIdentifier): boolean {
-		const chatExtensionId = this.productService.defaultChatAgent?.chatExtensionId;
-		return !!chatExtensionId && ExtensionIdentifier.equals(extensionId, chatExtensionId);
-	}
-
-	/**
 	 * Fetches and filters items for a given section.
-	 * Delegates to the provider path based on the active harness.
+	 * Delegates to the item source selected by the active harness.
 	 */
 	private async fetchItemsForSection(section: AICustomizationManagementSection): Promise<IAICustomizationListItem[]> {
 		const promptType = sectionToPromptType(section);
-		const activeDescriptor = this.harnessService.getActiveDescriptor();
-
-		if (activeDescriptor.itemProvider && promptType) {
-			return this.fetchProviderItemsForSection(activeDescriptor, promptType);
-		}
-
-		return [];
+		return this.getItemSource(this.harnessService.getActiveDescriptor()).fetchItems(promptType);
 	}
 
 	/**
-	 * Fetches items from an external customization provider.
-	 * When a syncProvider is present, blends remote items with local sync items.
+	 * Returns the rich, browser-internal item source for a harness descriptor.
+	 * The source is cached per descriptor id and reused across fetch and
+	 * subscription calls to avoid redundant event composition.
 	 */
-	private async fetchProviderItemsForSection(descriptor: ReturnType<ICustomizationHarnessService['getActiveDescriptor']>, promptType: PromptsType): Promise<IAICustomizationListItem[]> {
-		const remoteItems = await this.fetchItemsFromProvider(descriptor.itemProvider!, promptType);
-		if (!descriptor.syncProvider) {
-			return remoteItems;
+	private getItemSource(descriptor: ReturnType<ICustomizationHarnessService['getActiveDescriptor']>): IAICustomizationItemSource {
+		if (this.cachedItemSource && this.cachedItemSource.descriptorId === descriptor.id) {
+			return this.cachedItemSource.source;
 		}
-		const localItems = await this.fetchLocalSyncableItems(promptType, descriptor.syncProvider);
-		return [...remoteItems, ...localItems];
-	}
-
-	/**
-	 * Fetches items from an external customization provider, converting
-	 * the provider's items into the list widget format.
-	 */
-	private async fetchItemsFromProvider(provider: IExternalCustomizationItemProvider, promptType: PromptsType): Promise<IAICustomizationListItem[]> {
-		const allItems = await provider.provideChatSessionCustomizations(CancellationToken.None);
-		if (!allItems) {
-			return [];
-		}
-
-		const workspaceFolders = this.workspaceContextService.getWorkspace().folders;
-
-		// Build a URI→description lookup from promptsService for items the provider
-		// doesn't supply descriptions for (e.g. skills and instructions from ChatResource).
-		const descriptionsByUri = new ResourceMap<string>();
-		if (promptType === PromptsType.skill) {
-			const skills = await this.promptsService.findAgentSkills(CancellationToken.None);
-			for (const s of skills ?? []) {
-				if (s.description) {
-					descriptionsByUri.set(s.uri, s.description);
-				}
-			}
-		}
-
-		// Hooks: expand file-level items into individual hook entries (matching core path display)
-		if (promptType === PromptsType.hook) {
-			return this._expandProviderHookItems(allItems, workspaceFolders);
-		}
-
-		return allItems
-			.filter(item => item.type === promptType)
-			.map((item: IExternalCustomizationItem) => {
-				const { storage, groupKey } = item.groupKey
-					? { storage: undefined, groupKey: item.groupKey }
-					: this._inferStorageAndGroup(item.uri, workspaceFolders);
-				return {
-					id: item.uri.toString(),
-					uri: item.uri,
-					name: item.name,
-					filename: item.uri.scheme === Schemas.file
-						? this.labelService.getUriLabel(item.uri, { relative: true })
-						: basename(item.uri),
-					description: item.description ?? descriptionsByUri.get(item.uri),
-					promptType,
-					disabled: item.enabled === false,
-					status: item.status,
-					statusMessage: item.statusMessage,
-					groupKey,
-					badge: item.badge,
-					badgeTooltip: item.badgeTooltip,
-					storage,
-				};
-			})
-			.sort((a, b) => a.name.localeCompare(b.name));
-	}
-
-	/**
-	 * Expands provider hook items (file-level) into individual hook entries
-	 * with hook type labels and command descriptions, matching the core path display.
-	 */
-	private async _expandProviderHookItems(allItems: readonly IExternalCustomizationItem[], workspaceFolders: readonly { uri: URI }[]): Promise<IAICustomizationListItem[]> {
-		const hookFileItems = allItems.filter(item => item.type === PromptsType.hook);
-		const items: IAICustomizationListItem[] = [];
-		const activeRoot = this.workspaceService.getActiveProjectRoot();
-		const userHomeUri = await this.pathService.userHome();
-		const userHome = userHomeUri.scheme === Schemas.file ? userHomeUri.fsPath : userHomeUri.path;
-
-		for (const item of hookFileItems) {
-			const { storage } = item.groupKey
-				? { storage: undefined }
-				: this._inferStorageAndGroup(item.uri, workspaceFolders);
-
-			let parsedHooks = false;
-			try {
-				const content = await this.fileService.readFile(item.uri);
-				const json = parseJSONC(content.value.toString());
-				const { hooks } = parseHooksFromFile(item.uri, json, activeRoot, userHome);
-
-				if (hooks.size > 0) {
-					parsedHooks = true;
-					for (const [hookType, entry] of hooks) {
-						const hookMeta = HOOK_METADATA[hookType];
-						for (let i = 0; i < entry.hooks.length; i++) {
-							const hook = entry.hooks[i];
-							const cmdLabel = formatHookCommandLabel(hook, OS);
-							const truncatedCmd = cmdLabel.length > 60 ? cmdLabel.substring(0, 57) + '...' : cmdLabel;
-							items.push({
-								id: `${item.uri.toString()}#${entry.originalId}[${i}]`,
-								uri: item.uri,
-								name: hookMeta?.label ?? entry.originalId,
-								filename: basename(item.uri),
-								description: truncatedCmd || localize('hookUnset', "(unset)"),
-								storage,
-								promptType: PromptsType.hook,
-								disabled: item.enabled === false,
-							});
-						}
-					}
-				}
-			} catch {
-				// Parse failed — fall through to show raw file
-			}
-
-			if (!parsedHooks) {
-				items.push({
-					id: item.uri.toString(),
-					uri: item.uri,
-					name: item.name,
-					filename: basename(item.uri),
-					description: item.description,
-					storage,
-					promptType: PromptsType.hook,
-					disabled: item.enabled === false,
-				});
-			}
-		}
-
-		return items;
-	}
-
-	/**
-	 * Infers storage and groupKey from a URI for auto-grouping.
-	 *
-	 * - `file:` URIs under a workspace folder → storage `local` (Workspace group)
-	 * - `file:` URIs elsewhere (e.g. `~/.copilot/`) → storage `user` (User group)
-	 * - Non-file schemes (synthetic URIs, vscode-userdata:, etc.) → groupKey `builtin` (Built-in group)
-	 */
-	private _inferStorageAndGroup(uri: URI, workspaceFolders: readonly { uri: URI }[]): { storage?: PromptsStorage; groupKey?: string } {
-		// Non-file schemes are synthetic/built-in (includes vscode-userdata: for extension-contributed items)
-		if (uri.scheme !== Schemas.file) {
-			return { storage: PromptsStorage.extension, groupKey: BUILTIN_STORAGE };
-		}
-
-		// file: URI under a workspace folder = workspace (local)
-		for (const folder of workspaceFolders) {
-			if (isEqualOrParent(uri, folder.uri)) {
-				return { storage: PromptsStorage.local };
-			}
-		}
-
-		// file: URI under an installed plugin = plugin
-		for (const plugin of this.agentPluginService.plugins.get()) {
-			if (isEqualOrParent(uri, plugin.uri)) {
-				return { storage: PromptsStorage.plugin };
-			}
-		}
-
-		// file: URI inside an extension install directory = extension or built-in.
-		// At this point we've already checked workspace folders and plugins, so
-		// a path containing /extensions/<id>-<version>/ is an extension directory.
-		const extensionId = extractExtensionIdFromPath(uri.path);
-		if (extensionId) {
-			if (this.isChatExtensionItem(new ExtensionIdentifier(extensionId))) {
-				return { storage: PromptsStorage.extension, groupKey: BUILTIN_STORAGE };
-			}
-			return { storage: PromptsStorage.extension };
-		}
-
-		// file: URI elsewhere = user directory
-		return { storage: PromptsStorage.user };
-	}
-
-	/**
-	 * Fetches local customization items and marks them as syncable, using
-	 * the sync provider to determine their current selection state.
-	 * These items appear alongside remote items with sync checkboxes.
-	 */
-	private async fetchLocalSyncableItems(promptType: PromptsType, syncProvider: ICustomizationSyncProvider): Promise<IAICustomizationListItem[]> {
-		const files = await this.promptsService.listPromptFiles(promptType, CancellationToken.None);
-		if (!files.length) {
-			return [];
-		}
-
-		return files
-			.filter(f => f.storage === PromptsStorage.local || f.storage === PromptsStorage.user)
-			.map(f => ({
-				id: `sync-${f.uri.toString()}`,
-				uri: f.uri,
-				name: this.getFriendlyName(basename(f.uri)),
-				filename: basename(f.uri),
-				promptType,
-				disabled: false,
-				storage: f.storage,
-				groupKey: 'sync-local',
-				syncable: true,
-				synced: syncProvider.isSelected(f.uri),
-			}))
-			.sort((a, b) => a.name.localeCompare(b.name));
-	}
-
-	/**
-	 * Derives a friendly name from a filename by removing extension suffixes.
-	 */
-	private getFriendlyName(filename: string): string {
-		// Remove common prompt file extensions like .instructions.md, .prompt.md, etc.
-		let name = filename
-			.replace(/\.instructions\.md$/i, '')
-			.replace(/\.prompt\.md$/i, '')
-			.replace(/\.agent\.md$/i, '')
-			.replace(/\.md$/i, '');
-
-		// Convert kebab-case or snake_case to Title Case
-		name = name
-			.replace(/[-_]/g, ' ')
-			.replace(/\b\w/g, c => c.toUpperCase());
-
-		return name || filename;
+		const itemProvider = descriptor.itemProvider ?? (descriptor.syncProvider ? undefined : this.promptsServiceItemProvider);
+		const source = new ProviderCustomizationItemSource(
+			itemProvider,
+			descriptor.syncProvider,
+			this.promptsService,
+			this.workspaceService,
+			this.fileService,
+			this.pathService,
+			this.itemNormalizer,
+		);
+		this.cachedItemSource = { descriptorId: descriptor.id, source };
+		return source;
 	}
 
 	/**
@@ -1506,11 +1254,11 @@ export class AICustomizationListWidget extends Disposable {
 	}
 
 	/**
-	 * Filters and groups items from an external provider.
+	 * Groups normalized list items for display.
 	 * When a syncProvider is present, shows remote items + local sync items.
-	 * Otherwise, groups items by inferred storage/groupKey.
+	 * Otherwise, groups items by normalized storage/groupKey.
 	 */
-	private filterItemsForProvider(matchedItems: IAICustomizationListItem[]): void {
+	private groupMatchedItems(matchedItems: IAICustomizationListItem[]): void {
 		const activeDescriptor = this.harnessService.getActiveDescriptor();
 
 		if (activeDescriptor.syncProvider) {
@@ -1594,7 +1342,8 @@ export class AICustomizationListWidget extends Disposable {
 	 */
 	private filterItems(): number {
 		const matchedItems = this.applySearchFilter(this.allItems);
-		this.filterItemsForProvider(matchedItems);
+		this.groupMatchedItems(matchedItems);
+
 		return matchedItems.length;
 	}
 
@@ -1758,6 +1507,8 @@ export class AICustomizationListWidget extends Disposable {
 	 * Generates a debug report for the current section.
 	 */
 	async generateDebugReport(): Promise<string> {
+		// Ensure items are loaded before capturing the snapshot
+		await this.loadItems();
 		const activeDescriptor = this.harnessService.getActiveDescriptor();
 		return generateCustomizationDebugReport(
 			this.currentSection,
@@ -1765,6 +1516,7 @@ export class AICustomizationListWidget extends Disposable {
 			this.workspaceService,
 			{ allItems: this.allItems, displayEntries: this.displayEntries },
 			activeDescriptor,
+			this.promptsServiceItemProvider,
 		);
 	}
 }

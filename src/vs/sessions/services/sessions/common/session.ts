@@ -40,7 +40,6 @@ export const CopilotCloudSessionType: ISessionType = {
 	icon: Codicon.cloud,
 };
 
-export const GITHUB_PR_FILE_SCHEME = 'copilot-pr';
 export const GITHUB_REMOTE_FILE_SCHEME = 'github-remote-file';
 
 /**
@@ -187,6 +186,8 @@ export interface ISession {
 	readonly lastTurnEnd: IObservable<Date | undefined>;
 	/** GitHub information associated with this session, if any. */
 	readonly gitHubInfo: IObservable<IGitHubInfo | undefined>;
+	/** Whether the session is ready to accept requests. */
+	readonly ready: IObservable<boolean>;
 	/** The chats belonging to this session group. */
 	readonly chats: IObservable<readonly IChat[]>;
 	/** The main (first) chat of this session. */
