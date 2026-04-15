@@ -701,8 +701,17 @@ declare module 'vscode' {
 	export interface ChatSessionInputState {
 		/**
 		 * Fired when the input state is changed by the user.
+		 *
+		 * Move to controller?
 		 */
 		readonly onDidChange: Event<void>;
+
+		/**
+		 * The resource associated with this chat session.
+		 *
+		 * This is `undefined` for chat sessions that have not yet started.
+		 */
+		readonly sessionResource: Uri | undefined;
 
 		/**
 		 * The groups of options to show in the UI for user input.
