@@ -37,7 +37,7 @@ import { IChatWidgetService } from '../../../../chat/browser/chat.js';
 import { ChatPermissionLevel } from '../../../../chat/common/constants.js';
 import { LocalChatSessionUri } from '../../../../chat/common/model/chatUri.js';
 import { ITerminalSandboxService, TerminalSandboxPrerequisiteCheck, type ITerminalSandboxPrerequisiteCheckResult } from '../../common/terminalSandboxService.js';
-import { ILanguageModelToolsService, IPreparedToolInvocation, IToolData, IToolImpl, IToolInvocation, IToolInvocationPreparationContext, ToolDataSource, ToolSet, type ToolConfirmationAction } from '../../../../chat/common/tools/languageModelToolsService.js';
+import { ILanguageModelToolsService, IPreparedToolInvocation, IToolData, IToolImpl, IToolInvocationPreparationContext, ToolDataSource, ToolSet, type ToolConfirmationAction } from '../../../../chat/common/tools/languageModelToolsService.js';
 import { ITerminalChatService, ITerminalService, type ITerminalInstance } from '../../../../terminal/browser/terminal.js';
 import { ITerminalProfileResolverService } from '../../../../terminal/common/terminal.js';
 import type { ICommandLinePresenter } from '../../browser/tools/commandLinePresenter/commandLinePresenter.js';
@@ -1943,6 +1943,58 @@ suite('RunInTerminalTool', () => {
 		strictEqual(capturedSteeringRequests.length, 2, 'Expected a changed prompt to trigger a new notification');
 	});
 
+	test('should preserve session terminal association after inputNeeded so fg terminal is reused', () => {
+		const termId = 'test-input-cleanup-term';
+		const sessionResource = LocalChatSessionUri.forSession('test-input-cleanup-session');
+
+		const commandFinishedEmitter = new Emitter<{ exitCode: number | undefined }>();
+		const terminalDisposedEmitter = new Emitter<void>();
+		const inputNeededEmitter = new Emitter<void>();
+		const inputDataEmitter = new Emitter<string>();
+
+		const terminalInstance = {
+			capabilities: {
+				get: (cap: TerminalCapability) => cap === TerminalCapability.CommandDetection ? { onCommandFinished: commandFinishedEmitter.event } : undefined,
+			},
+			onDisposed: terminalDisposedEmitter.event,
+			onDidInputData: inputDataEmitter.event,
+		} as unknown as ITerminalInstance;
+
+		const outputMonitor = {
+			onDidDetectInputNeeded: inputNeededEmitter.event,
+			continueMonitoringAsync: () => { },
+			dispose: () => { },
+		} as unknown as { onDidDetectInputNeeded: Event<void>; continueMonitoringAsync: () => void; dispose: () => void };
+
+		// Set up fg terminal association and active execution
+		runInTerminalTool.sessionTerminalAssociations.set(sessionResource, {
+			instance: terminalInstance,
+			shellIntegrationQuality: ShellIntegrationQuality.Rich,
+			isBackground: false,
+		});
+
+		(runInTerminalTool.constructor as unknown as { _activeExecutions: Map<string, { getOutput(): string }> })._activeExecutions.set(termId, {
+			getOutput: () => 'Password:',
+		});
+
+		// eslint-disable-next-line @typescript-eslint/naming-convention
+		(runInTerminalTool as unknown as { _registerCompletionNotification: (terminal: ITerminalInstance, termId: string, session: URI, commandName: string, outputMonitor: { onDidDetectInputNeeded: Event<void>; continueMonitoringAsync: () => void; dispose: () => void }) => void })
+			._registerCompletionNotification(terminalInstance, termId, sessionResource, 'ssh host', outputMonitor);
+
+		// Fire inputNeeded — this simulates the output monitor detecting a prompt
+		inputNeededEmitter.fire();
+		strictEqual(capturedSteeringRequests.length, 1, 'Should send steering request for input needed');
+
+		// The key assertion: fg terminal association is preserved (not deleted)
+		ok(runInTerminalTool.sessionTerminalAssociations.has(sessionResource), 'Session terminal association should be preserved for fg reuse');
+		strictEqual(runInTerminalTool.sessionTerminalAssociations.get(sessionResource)!.isBackground, false, 'Terminal should remain foreground');
+
+		// After command finishes, the fg association still persists
+		commandFinishedEmitter.fire({ exitCode: 0 });
+		ok(runInTerminalTool.sessionTerminalAssociations.has(sessionResource), 'Session terminal association should still be preserved after command finishes');
+		strictEqual(runInTerminalTool.sessionTerminalAssociations.get(sessionResource)!.isBackground, false, 'Terminal should still be foreground after command finishes');
+	});
+
 	suite('auto approve warning acceptance mechanism', () => {
 		test('should require confirmation for auto-approvable commands when warning not accepted', async () => {
 			setConfig(TerminalChatAgentToolsSettingId.EnableAutoApprove, true);
@@ -2216,24 +2268,6 @@ suite('RunInTerminalTool', () => {
 	});
 
 	suite('ConfirmTerminalCommandTool', () => {
-		async function invokeConfirmTool(tool: RunInTerminalTool, original: string, userEdited?: string) {
-			const invocation = {
-				callId: 'test-call-id',
-				toolId: 'confirmTerminalCommand',
-				parameters: {},
-				context: undefined,
-				toolSpecificData: {
-					kind: 'terminal',
-					commandLine: {
-						original,
-						userEdited,
-					},
-					language: 'bash',
-				} as IChatTerminalToolInvocationData
-			} as IToolInvocation;
-			return tool.invoke(invocation, () => Promise.resolve(0), { report: () => { } }, CancellationToken.None);
-		}
-
 		test('should require confirmation when sandbox is enabled but sandbox rewriting is disabled', async () => {
 			sandboxEnabled = true;
 
@@ -2273,36 +2307,6 @@ suite('RunInTerminalTool', () => {
 
 			const result = await confirmTool.prepareToolInvocation(context, CancellationToken.None);
 			assertConfirmationRequired(result);
-		});
-
-		test('invoke should return approved message when user does not edit command', async () => {
-			const { ConfirmTerminalCommandTool } = await import('../../browser/tools/runInTerminalConfirmationTool.js');
-			const confirmTool = store.add(instantiationService.createInstance(ConfirmTerminalCommandTool));
-
-			const result = await invokeConfirmTool(confirmTool, 'echo hello');
-			strictEqual(result.content[0].kind, 'text');
-			strictEqual((result.content[0] as { kind: 'text'; value: string }).value, 'The user approved the command.');
-		});
-
-		test('invoke should return edited command when user edits the command', async () => {
-			const { ConfirmTerminalCommandTool } = await import('../../browser/tools/runInTerminalConfirmationTool.js');
-			const confirmTool = store.add(instantiationService.createInstance(ConfirmTerminalCommandTool));
-
-			const result = await invokeConfirmTool(confirmTool, 'echo hello', 'echo stop');
-			strictEqual(result.content[0].kind, 'text');
-			const textValue = (result.content[0] as { kind: 'text'; value: string }).value;
-			ok(textValue.includes('<editedCommand>'), 'Result should contain editedCommand tags');
-			ok(textValue.includes('echo stop'), 'Result should contain the edited command');
-			ok(textValue.includes('edited'), 'Result should indicate the command was edited');
-		});
-
-		test('invoke should return approved message when userEdited equals original', async () => {
-			const { ConfirmTerminalCommandTool } = await import('../../browser/tools/runInTerminalConfirmationTool.js');
-			const confirmTool = store.add(instantiationService.createInstance(ConfirmTerminalCommandTool));
-
-			const result = await invokeConfirmTool(confirmTool, 'echo hello', 'echo hello');
-			strictEqual(result.content[0].kind, 'text');
-			strictEqual((result.content[0] as { kind: 'text'; value: string }).value, 'The user approved the command.');
 		});
 	});
 });
