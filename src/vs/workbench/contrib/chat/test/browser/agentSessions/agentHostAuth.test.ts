@@ -8,9 +8,13 @@ import { URI } from '../../../../../../base/common/uri.js';
 import { type ProtectedResourceMetadata } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
 import { type AgentInfo } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
-import { NullLogService } from '../../../../../../platform/log/common/log.js';
+import { TestInstantiationService } from '../../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
+import { ILogService, NullLogService } from '../../../../../../platform/log/common/log.js';
+import { IAuthenticationMcpAccessService } from '../../../../../services/authentication/browser/authenticationMcpAccessService.js';
+import { IAuthenticationMcpService } from '../../../../../services/authentication/browser/authenticationMcpService.js';
+import { IAuthenticationMcpUsageService } from '../../../../../services/authentication/browser/authenticationMcpUsageService.js';
 import { IAuthenticationService } from '../../../../../services/authentication/common/authentication.js';
-import { authenticateProtectedResources, resolveAuthenticationInteractively, resolveTokenForResource, AgentHostAuthTokenCache } from '../../../browser/agentSessions/agentHost/agentHostAuth.js';
+import { authenticateProtectedResources, resolveAuthenticationInteractively, resolveTokenForResource, AgentHostAuthTokenCache, agentHostMcpServerId, resolveMcpServerAuthentication } from '../../../browser/agentSessions/agentHost/agentHostAuth.js';
 
 function createMockAuthService(overrides: {
 	getOrActivateProviderIdForServer?: (serverUri: URI, resourceUri: URI) => Promise<string | undefined>;
@@ -23,6 +27,31 @@ function createMockAuthService(overrides: {
 		createSession: overrides.createSession ?? (() => Promise.reject(new Error('Unexpected createSession call'))),
 	} as unknown as IAuthenticationService;
 }
+
+suite('agentHostMcpServerId', () => {
+
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('is stable for the same authority, server name and resource url', () => {
+		// The key must not depend on the (per-session / per-sync) customization id, so remembered
+		// auth survives reloads. Same inputs must always produce the same key.
+		const a = agentHostMcpServerId('remote-host', 'GitHub', 'https://api.githubcopilot.com/mcp/');
+		const b = agentHostMcpServerId('remote-host', 'GitHub', 'https://api.githubcopilot.com/mcp/');
+		assert.strictEqual(a, b);
+		assert.strictEqual(a, 'agent-host-mcp:remote-host/GitHub/https%3A%2F%2Fapi.githubcopilot.com%2Fmcp%2F');
+	});
+
+	test('differs when authority, name or url differ', () => {
+		const base = agentHostMcpServerId('host-1', 'GitHub', 'https://a.example/mcp');
+		const keys = new Set([
+			base,
+			agentHostMcpServerId('host-2', 'GitHub', 'https://a.example/mcp'),
+			agentHostMcpServerId('host-1', 'Other', 'https://a.example/mcp'),
+			agentHostMcpServerId('host-1', 'GitHub', 'https://b.example/mcp'),
+		]);
+		assert.strictEqual(keys.size, 4);
+	});
+});
 
 suite('resolveTokenForResource', () => {
 
@@ -123,39 +152,90 @@ suite('AgentHostAuthTokenCache', () => {
 
 	test('first token for a resource is reported as changed', () => {
 		const cache = new AgentHostAuthTokenCache();
-		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', 'tok1'), true);
+		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', ['read'], 'tok1'), true);
 	});
 
 	test('repeating the same token for the same resource is reported as unchanged', () => {
 		const cache = new AgentHostAuthTokenCache();
-		cache.updateAndIsChanged('https://api.example.com', 'tok1');
-		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', 'tok1'), false);
-		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', 'tok1'), false);
+		cache.updateAndIsChanged('https://api.example.com', ['read'], 'tok1');
+		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', ['read'], 'tok1'), false);
+		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', ['read'], 'tok1'), false);
 	});
 
 	test('a different token for the same resource is reported as changed', () => {
 		const cache = new AgentHostAuthTokenCache();
-		cache.updateAndIsChanged('https://api.example.com', 'tok1');
-		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', 'tok2'), true);
+		cache.updateAndIsChanged('https://api.example.com', ['read'], 'tok1');
+		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', ['read'], 'tok2'), true);
 		// And the new token is now the cached one.
-		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', 'tok2'), false);
+		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', ['read'], 'tok2'), false);
+	});
+
+	test('tokens for distinct scopes are tracked independently', () => {
+		const cache = new AgentHostAuthTokenCache();
+		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', ['read'], 'read-token'), true);
+		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', ['write'], 'write-token'), true);
+		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', ['read'], 'read-token'), false);
+		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', ['write'], 'write-token'), false);
 	});
 
 	test('tokens for distinct resources are tracked independently', () => {
 		const cache = new AgentHostAuthTokenCache();
-		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', 'tok1'), true);
-		assert.strictEqual(cache.updateAndIsChanged('https://other.example.com', 'tok1'), true);
-		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', 'tok1'), false);
-		assert.strictEqual(cache.updateAndIsChanged('https://other.example.com', 'tok1'), false);
+		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', ['read'], 'tok1'), true);
+		assert.strictEqual(cache.updateAndIsChanged('https://other.example.com', ['read'], 'tok1'), true);
+		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', ['read'], 'tok1'), false);
+		assert.strictEqual(cache.updateAndIsChanged('https://other.example.com', ['read'], 'tok1'), false);
 	});
 
 	test('clear forgets every cached token', () => {
 		const cache = new AgentHostAuthTokenCache();
-		cache.updateAndIsChanged('https://api.example.com', 'tok1');
-		cache.updateAndIsChanged('https://other.example.com', 'tok2');
+		cache.updateAndIsChanged('https://api.example.com', ['read'], 'tok1');
+		cache.updateAndIsChanged('https://other.example.com', ['read'], 'tok2');
 		cache.clear();
-		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', 'tok1'), true);
-		assert.strictEqual(cache.updateAndIsChanged('https://other.example.com', 'tok2'), true);
+		assert.strictEqual(cache.updateAndIsChanged('https://api.example.com', ['read'], 'tok1'), true);
+		assert.strictEqual(cache.updateAndIsChanged('https://other.example.com', ['read'], 'tok2'), true);
+	});
+});
+
+suite('resolveMcpServerAuthentication', () => {
+
+	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('uses challenge scopes without replacing the protected resource scope catalog', async () => {
+		const requestedScopes: (readonly string[] | undefined)[] = [];
+		const authService = createMockAuthService({
+			getOrActivateProviderIdForServer: () => Promise.resolve('provider-1'),
+			getSessions: (_providerId, scopes) => {
+				requestedScopes.push(scopes);
+				return Promise.resolve([]);
+			},
+		});
+		const instantiationService = disposables.add(new TestInstantiationService());
+		instantiationService.stub(IAuthenticationService, authService);
+		instantiationService.stub(IAuthenticationMcpAccessService, {});
+		instantiationService.stub(IAuthenticationMcpService, {
+			getAccountPreference: () => undefined,
+		});
+		instantiationService.stub(IAuthenticationMcpUsageService, {});
+		instantiationService.stub(ILogService, new NullLogService());
+
+		const result = await instantiationService.invokeFunction(resolveMcpServerAuthentication, {
+			resource: 'https://mcp.example.com',
+			authorization_servers: ['https://auth.example.com'],
+			scopes_supported: ['repo', 'read:org', 'notifications'],
+		}, {
+			allowInteraction: false,
+			logPrefix: '[AgentHost]',
+			mcpServerId: 'server-id',
+			mcpServerName: 'Example',
+			mcpServerUrl: 'https://mcp.example.com',
+			scopes: ['notifications'],
+			authenticate: async () => { },
+		});
+
+		assert.deepStrictEqual({ result, requestedScopes }, {
+			result: false,
+			requestedScopes: [['notifications']],
+		});
 	});
 });
 
@@ -182,7 +262,7 @@ suite('authenticateProtectedResources', () => {
 			},
 		});
 		const cache = new AgentHostAuthTokenCache();
-		const requests: { resource: string; token: string }[] = [];
+		const requests: { resource: string; scopes?: readonly string[]; token: string }[] = [];
 		const agents = [{ protectedResources: [protectedResource] }] as unknown as readonly AgentInfo[];
 
 		await authenticateProtectedResources(agents, {
@@ -204,7 +284,7 @@ suite('authenticateProtectedResources', () => {
 			},
 		});
 
-		assert.deepStrictEqual(requests, [{ resource: protectedResource.resource, token: 'cached-token' }]);
+		assert.deepStrictEqual(requests, [{ resource: protectedResource.resource, scopes: ['read'], token: 'cached-token' }]);
 	});
 });
 
@@ -235,7 +315,7 @@ suite('resolveAuthenticationInteractively', () => {
 				return { accessToken: 'new-token' };
 			},
 		});
-		const requests: { resource: string; token: string }[] = [];
+		const requests: { resource: string; scopes?: readonly string[]; token: string }[] = [];
 
 		const success = await resolveAuthenticationInteractively([protectedResource], {
 			authTokenCache: new AgentHostAuthTokenCache(),
@@ -248,7 +328,7 @@ suite('resolveAuthenticationInteractively', () => {
 		});
 
 		assert.strictEqual(success, true);
-		assert.deepStrictEqual(requests, [{ resource: protectedResource.resource, token: 'existing-token' }]);
+		assert.deepStrictEqual(requests, [{ resource: protectedResource.resource, scopes: ['read'], token: 'existing-token' }]);
 		assert.strictEqual(createSessionCalls, 0);
 	});
 
@@ -258,7 +338,7 @@ suite('resolveAuthenticationInteractively', () => {
 			getSessions: () => Promise.resolve([]),
 			createSession: async () => ({ accessToken: 'new-token' }),
 		});
-		const requests: { resource: string; token: string }[] = [];
+		const requests: { resource: string; scopes?: readonly string[]; token: string }[] = [];
 
 		const success = await resolveAuthenticationInteractively([protectedResource], {
 			authTokenCache: new AgentHostAuthTokenCache(),
@@ -271,6 +351,6 @@ suite('resolveAuthenticationInteractively', () => {
 		});
 
 		assert.strictEqual(success, true);
-		assert.deepStrictEqual(requests, [{ resource: protectedResource.resource, token: 'new-token' }]);
+		assert.deepStrictEqual(requests, [{ resource: protectedResource.resource, scopes: ['read'], token: 'new-token' }]);
 	});
 });

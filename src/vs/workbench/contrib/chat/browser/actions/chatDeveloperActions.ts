@@ -21,6 +21,9 @@ import { IStorageService, StorageScope } from '../../../../../platform/storage/c
 import { AUTOPILOT_DONT_SHOW_AGAIN_KEY, AUTO_APPROVE_DONT_SHOW_AGAIN_KEY } from '../../common/chatPermissionStorageKeys.js';
 import { resetShownWarnings } from '../../common/chatPermissionWarnings.js';
 import { OpenCopilotCliStateFileAction } from './openCopilotCliStateFileAction.js';
+import { IAgentConnection, IAgentHostDnsResult, IAgentHostNetworkEndpoint, IAgentHostNetworkFetchResult } from '../../../../../platform/agentHost/common/agentService.js';
+import { IAgentHostConnectionsService } from '../../../../../platform/agentHost/common/agentHostConnectionsService.js';
+import { StateComponents } from '../../../../../platform/agentHost/common/state/sessionState.js';
 
 function uriReplacer(_key: string, value: unknown): unknown {
 	if (URI.isUri(value)) {
@@ -40,6 +43,8 @@ export function registerChatDeveloperActions() {
 	registerAction2(LogChatIndexAction);
 	registerAction2(InspectChatModelAction);
 	registerAction2(InspectChatModelReferencesAction);
+	registerAction2(InspectAgentHostSubscriptionsAction);
+	registerAction2(NetworkDiagnosticsAction);
 	registerAction2(ClearRecentlyUsedLanguageModelsAction);
 	registerAction2(ResetChatPermissionWarningDialogsAction);
 	registerAction2(OpenCopilotCliStateFileAction);
@@ -214,6 +219,245 @@ class InspectChatModelReferencesAction extends Action2 {
 		await editorService.openEditor({
 			resource: undefined,
 			contents: instantiationService.invokeFunction(formatChatModelReferenceInspection),
+			languageId: 'markdown',
+			options: {
+				pinned: true
+			}
+		});
+	}
+}
+
+function subscriptionKindLabel(kind: StateComponents): string {
+	switch (kind) {
+		case StateComponents.Root: return 'root';
+		case StateComponents.Session: return 'session';
+		case StateComponents.Terminal: return 'terminal';
+		case StateComponents.Changeset: return 'changeset';
+		default: return `unknown(${kind})`;
+	}
+}
+
+/** Escape a value so it is safe to embed in a markdown table cell. */
+function escapeMarkdownTableCell(value: string): string {
+	return value.replace(/\r?\n/g, '<br>').replace(/\|/g, '\\|');
+}
+
+function formatConnectionSubscriptions(label: string, details: string, connection: IAgentConnection | undefined): string {
+	let output = `## ${label}\n\n`;
+	output += `- ${details}\n`;
+
+	if (!connection) {
+		output += '- Not connected.\n\n';
+		return output;
+	}
+
+	const root = connection.rootState.value;
+	if (root === undefined) {
+		output += '- Root state: pending (no snapshot yet)\n';
+	} else if (root instanceof Error) {
+		output += `- Root state: error (${root.message})\n`;
+	} else {
+		const agents = root.agents?.map(a => a.displayName).join(', ') || 'none';
+		output += `- Root state: agents=[${agents}], activeSessions=${root.activeSessions ?? 0}, terminals=${root.terminals?.length ?? 0}\n`;
+	}
+
+	const subscriptions = connection.getActiveSubscriptions();
+	output += `- Active subscriptions: ${subscriptions.length}\n\n`;
+
+	if (subscriptions.length) {
+		const sorted = [...subscriptions].sort((a, b) => a.resource.toString().localeCompare(b.resource.toString()));
+		output += '| Resource | Kind | Refs | Holders | Status |\n';
+		output += '| --- | --- | --- | --- | --- |\n';
+		for (const subscription of sorted) {
+			const holders = subscription.holders.length
+				? subscription.holders.map(h => h.count > 1 ? `${h.owner} (${h.count})` : h.owner).join(', ')
+				: '(none)';
+			const cells = [
+				subscription.resource.toString(),
+				subscriptionKindLabel(subscription.kind),
+				String(subscription.refCount),
+				holders,
+				subscription.status,
+			].map(escapeMarkdownTableCell);
+			output += `| ${cells.join(' | ')} |\n`;
+		}
+		output += '\n';
+	}
+
+	return output;
+}
+
+function formatAgentHostSubscriptionsInspection(accessor: ServicesAccessor): string {
+	const connectionsService = accessor.get(IAgentHostConnectionsService);
+
+	const connections = connectionsService.connections;
+	const remoteCount = connections.filter(c => !c.isAmbient).length;
+
+	let output = '# Agent Host Subscriptions\n\n';
+	output += `- Connections: ${connections.length} (1 ambient, ${remoteCount} remote)\n`;
+	output += 'Lists every resource each connected agent host is currently subscribed to. The always-live root state is summarized separately from the per-resource subscription table.\n\n';
+
+	for (const info of connections) {
+		const heading = info.isAmbient ? 'Ambient agent host' : `Remote: ${info.name}`;
+		const details = [
+			...(info.address ? [`address: ${info.address}`] : []),
+			`clientId: ${info.connection?.clientId || '(none)'}`,
+		].join(' · ');
+		output += formatConnectionSubscriptions(heading, details, info.connection);
+	}
+
+	return output;
+}
+
+class InspectAgentHostSubscriptionsAction extends Action2 {
+	static readonly ID = 'workbench.action.chat.inspectAgentHostSubscriptions';
+
+	constructor() {
+		super({
+			id: InspectAgentHostSubscriptionsAction.ID,
+			title: localize2('workbench.action.chat.inspectAgentHostSubscriptions.label', "Inspect Agent Host Subscriptions"),
+			icon: Codicon.inspect,
+			category: Categories.Developer,
+			f1: true,
+			precondition: ChatContextKeys.enabled
+		});
+	}
+
+	override async run(accessor: ServicesAccessor): Promise<void> {
+		const instantiationService = accessor.get(IInstantiationService);
+		const editorService = accessor.get(IEditorService);
+
+		await editorService.openEditor({
+			resource: undefined,
+			contents: instantiationService.invokeFunction(formatAgentHostSubscriptionsInspection),
+			languageId: 'markdown',
+			options: {
+				pinned: true
+			}
+		});
+	}
+}
+
+async function collectNetworkDiagnostics(connectionsService: IAgentHostConnectionsService): Promise<string> {
+	const connections = connectionsService.connections;
+	const remoteCount = connections.filter(c => !c.isAmbient).length;
+
+	let output = '# Agent Host Network Diagnostics\n\n';
+	output += `- Connections: ${connections.length} (1 ambient, ${remoteCount} remote)\n`;
+	output += 'Connectivity probes run inside each agent host process (local or remote), so results reflect the environment the Copilot SDK actually connects from.\n\n';
+
+	for (const info of connections) {
+		const heading = info.isAmbient ? 'Ambient agent host' : `Remote: ${info.name}`;
+		output += `## ${heading}\n\n`;
+		if (info.address) {
+			output += `- address: ${info.address}\n`;
+		}
+		if (!info.connection) {
+			output += '- Not connected.\n\n';
+			continue;
+		}
+		try {
+			output += await formatConnectionNetworkDiagnostics(info.connection);
+		} catch (err) {
+			output += `- Failed to run network diagnostics: ${err instanceof Error ? err.message : String(err)}\n\n`;
+		}
+	}
+
+	return output;
+}
+
+async function formatConnectionNetworkDiagnostics(connection: IAgentConnection): Promise<string> {
+	const info = await connection.getNetworkDiagnosticsInfo();
+
+	let output = '';
+	output += `- Agent host version: ${info.version}\n`;
+	output += `- OS: ${info.os} (${info.arch})\n`;
+	output += `- Account: ${info.account ?? '(unknown)'}\n`;
+	output += `- Proxy settings: ${formatKeyValues(info.proxySettings)}\n`;
+	output += `- Proxy environment: ${formatKeyValues(info.proxyEnv)}\n\n`;
+
+	const probes = await Promise.all(info.endpoints.map(async endpoint => ({
+		endpoint,
+		result: await connection.diagnosticsFetch(endpoint.url),
+	})));
+	for (const { endpoint, result } of probes) {
+		output += formatEndpointSection(endpoint, result);
+	}
+	return output;
+}
+
+function formatKeyValues(values: Readonly<Record<string, string>>): string {
+	const entries = Object.entries(values);
+	return entries.length ? entries.map(([key, value]) => `${key}=${value}`).join(', ') : '(none)';
+}
+
+function formatEndpointSection(endpoint: IAgentHostNetworkEndpoint, result: IAgentHostNetworkFetchResult): string {
+	let output = `### ${endpoint.name}\n\n`;
+	output += `- URL: ${result.url}\n`;
+	output += `- DNS IPv4: ${formatDnsResult(result.dnsIpv4)}\n`;
+	output += `- DNS IPv6: ${formatDnsResult(result.dnsIpv6)}\n`;
+	output += `- Proxy: ${result.proxyUrl ?? 'None'}\n`;
+	output += `- Reachability: ${formatReachability(endpoint, result)}\n\n`;
+	return output;
+}
+
+function formatDnsResult(dns: IAgentHostDnsResult | undefined): string {
+	if (!dns) {
+		return 'n/a';
+	}
+	return dns.address
+		? `${dns.address} (${dns.durationMs} ms)`
+		: `error (${dns.durationMs} ms): ${dns.error ?? 'unknown'}`;
+}
+
+/**
+ * Computes the reachability verdict for a probe, applying the endpoint's
+ * expected status (defaulting to 200) and optional expected content. The
+ * agent-host probe only reports raw facts; the pass/fail decision lives here.
+ */
+function formatReachability(endpoint: IAgentHostNetworkEndpoint, result: IAgentHostNetworkFetchResult): string {
+	// allow-any-unicode-next-line
+	const PASS_MARK = '✓', FAIL_MARK = '✗';
+	const duration = result.durationMs !== undefined ? ` (${result.durationMs} ms)` : '';
+	if (result.error !== undefined) {
+		return `${FAIL_MARK} ${result.error}${duration}`;
+	}
+	const connectVia = result.proxyUrl && /^https?:/i.test(result.proxyUrl) ? 'proxy' : 'direct';
+	const expectedStatus = endpoint.expectedStatus ?? 200;
+	const failures: string[] = [];
+	if (result.statusCode !== expectedStatus) {
+		failures.push(`status ${result.statusCode ?? '?'} (expected ${expectedStatus})`);
+	}
+	if (endpoint.expectedContent && !(result.body ?? '').includes(endpoint.expectedContent)) {
+		failures.push(`missing "${endpoint.expectedContent}"`);
+	}
+	return failures.length
+		? `${FAIL_MARK} ${failures.join(', ')} via ${connectVia}${duration}`
+		: `${PASS_MARK} ${result.statusCode} via ${connectVia}${duration}`;
+}
+
+class NetworkDiagnosticsAction extends Action2 {
+	static readonly ID = 'workbench.action.chat.agentHostNetworkDiagnostics';
+
+	constructor() {
+		super({
+			id: NetworkDiagnosticsAction.ID,
+			title: localize2('workbench.action.chat.agentHostNetworkDiagnostics.label', "Network Diagnostics"),
+			icon: Codicon.plug,
+			category: Categories.Developer,
+			f1: true,
+			precondition: ChatContextKeys.enabled
+		});
+	}
+
+	override async run(accessor: ServicesAccessor): Promise<void> {
+		const editorService = accessor.get(IEditorService);
+		const connectionsService = accessor.get(IAgentHostConnectionsService);
+
+		const contents = await collectNetworkDiagnostics(connectionsService);
+		await editorService.openEditor({
+			resource: undefined,
+			contents,
 			languageId: 'markdown',
 			options: {
 				pinned: true
