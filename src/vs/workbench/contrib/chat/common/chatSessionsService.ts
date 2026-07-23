@@ -386,6 +386,7 @@ export interface IChatSession extends IDisposable {
 
 	readonly progressObs?: IObservable<IChatProgress[]>;
 	readonly isCompleteObs?: IObservable<boolean>;
+	readonly isReadOnly?: IObservable<boolean>;
 	readonly interruptActiveResponseCallback?: () => Promise<boolean>;
 
 	/**
@@ -477,6 +478,13 @@ export interface IChatInputCompletionsParams {
 export interface IChatInputCompletionItem {
 	/** Text inserted into the input when this item is accepted. */
 	readonly insertText: string;
+	/**
+	 * Optional display label shown in the completion picker. When omitted, the
+	 * workbench displays {@link insertText}. Set this when the inserted text
+	 * differs from the label — e.g. an action item that inserts nothing
+	 * (`insertText: ''`) but should still be shown to the user.
+	 */
+	readonly label?: string;
 	/**
 	 * Half-open range `[start, end)` in the *current* input text that
 	 * {@link insertText} replaces. Positions use 1-based `lineNumber` and
@@ -587,6 +595,11 @@ export interface IChatSessionItemController {
 	 * as a result of the deletion.
 	 */
 	deleteChatSessionItem?(resource: URI, token: CancellationToken): Promise<void>;
+
+	/**
+	 * Set the authoritative archived state for the session identified by `resource`.
+	 */
+	setChatSessionItemArchived?(resource: URI, archived: boolean): void;
 }
 
 export interface IChatSessionOptionsChangeEvent {
@@ -727,6 +740,16 @@ export interface IChatSessionsService {
 	 * Returns the resolved item, or undefined if no resolve handler is available.
 	 */
 	resolveChatSessionItem(chatSessionType: string, resource: URI, token: CancellationToken): Promise<IChatSessionItem | undefined>;
+
+	/**
+	 * Whether the registered item controller owns archived state for the session.
+	 */
+	canSetChatSessionItemArchived(sessionResource: URI): boolean;
+
+	/**
+	 * Sets archived state by delegating to the registered item controller.
+	 */
+	setChatSessionItemArchived(sessionResource: URI, archived: boolean): void;
 
 	// #endregion
 
