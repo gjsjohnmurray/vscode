@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 import { LanguageClient, LanguageClientOptions } from 'vscode-languageclient/browser';
 import { MdLanguageClient, startClient } from './client/client';
 import { activateShared } from './extension.shared';
+export { deactivate } from './extension.shared';
 import { VsCodeOutputLogger } from './logging';
 import { IMdParser, MarkdownItEngine } from './markdownEngine';
 import { getMarkdownExtensionContributions } from './markdownExtensions';
@@ -27,7 +28,7 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 function startServer(context: vscode.ExtensionContext, parser: IMdParser): Promise<MdLanguageClient> {
-	const serverMain = vscode.Uri.joinPath(context.extensionUri, 'server/dist/browser/workerMain.js');
+	const serverMain = vscode.Uri.joinPath(context.extensionUri, 'dist', 'browser', 'serverWorkerMain.js');
 
 	const worker = new Worker(serverMain.toString());
 	worker.postMessage({ i10lLocation: vscode.l10n.uri?.toString() ?? '' });

@@ -3,20 +3,21 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as performance from 'vs/base/common/performance';
-import { URI } from 'vs/base/common/uri';
-import { MainThreadTelemetryShape, MainContext } from 'vs/workbench/api/common/extHost.protocol';
-import { ExtHostConfigProvider, IExtHostConfiguration } from 'vs/workbench/api/common/extHostConfiguration';
-import { nullExtensionDescription } from 'vs/workbench/services/extensions/common/extensions';
+import * as performance from '../../../base/common/performance.js';
+import { URI } from '../../../base/common/uri.js';
+import { MainThreadTelemetryShape, MainContext } from './extHost.protocol.js';
+import { ExtHostConfigProvider, IExtHostConfiguration } from './extHostConfiguration.js';
+import { nullExtensionDescription } from '../../services/extensions/common/extensions.js';
 import * as vscode from 'vscode';
-import { ExtensionIdentifierMap } from 'vs/platform/extensions/common/extensions';
-import { IExtensionApiFactory, IExtensionRegistries } from 'vs/workbench/api/common/extHost.api.impl';
-import { IExtHostRpcService } from 'vs/workbench/api/common/extHostRpcService';
-import { IExtHostInitDataService } from 'vs/workbench/api/common/extHostInitDataService';
-import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
-import { ExtensionPaths, IExtHostExtensionService } from 'vs/workbench/api/common/extHostExtensionService';
-import { ILogService } from 'vs/platform/log/common/log';
-import { escapeRegExpCharacters } from 'vs/base/common/strings';
+import { ExtensionIdentifierMap } from '../../../platform/extensions/common/extensions.js';
+import { IExtensionApiFactory, IExtensionRegistries } from './extHost.api.impl.js';
+import { IExtHostRpcService } from './extHostRpcService.js';
+import { IExtHostInitDataService } from './extHostInitDataService.js';
+import { IInstantiationService } from '../../../platform/instantiation/common/instantiation.js';
+import { ExtensionPaths, IExtHostExtensionService } from './extHostExtensionService.js';
+import { ILogService } from '../../../platform/log/common/log.js';
+import { ExtHostGitHub, InternalGitHubModuleFactory } from './extHostGitHub.js';
+import { escapeRegExpCharacters } from '../../../base/common/strings.js';
 
 
 interface LoadFunction {
@@ -27,7 +28,7 @@ interface IAlternativeModuleProvider {
 	alternativeModuleName(name: string): string | undefined;
 }
 
-interface INodeModuleFactory extends Partial<IAlternativeModuleProvider> {
+export interface INodeModuleFactory extends Partial<IAlternativeModuleProvider> {
 	readonly nodeModuleName: string | string[];
 	load(request: string, parent: URI, original: LoadFunction): any;
 }
@@ -45,6 +46,7 @@ export abstract class RequireInterceptor {
 		@IExtHostExtensionService private readonly _extHostExtensionService: IExtHostExtensionService,
 		@IExtHostInitDataService private readonly _initData: IExtHostInitDataService,
 		@ILogService private readonly _logService: ILogService,
+		@IExtHostRpcService private readonly _rpcService: IExtHostRpcService,
 	) {
 		this._factories = new Map<string, INodeModuleFactory>();
 		this._alternatives = [];
@@ -60,6 +62,7 @@ export abstract class RequireInterceptor {
 		const extensionPaths = await this._extHostExtensionService.getExtensionPathIndex();
 
 		this.register(new VSCodeNodeModuleFactory(this._apiFactory, extensionPaths, this._extensionRegistry, configProvider, this._logService));
+		this.register(new InternalGitHubModuleFactory(extensionPaths, new ExtHostGitHub(this._rpcService.getProxy(MainContext.MainThreadGitHub))));
 		this.register(this._instaService.createInstance(NodeModuleAliasingModuleFactory));
 		if (this._initData.remote.isRemote) {
 			this.register(this._instaService.createInstance(OpenNodeModuleFactory, extensionPaths, this._initData.environment.appUriScheme));
@@ -95,7 +98,8 @@ class NodeModuleAliasingModuleFactory implements IAlternativeModuleProvider {
 	 * renamed without breaking extensions. In the form "original -> new name".
 	 */
 	private static readonly aliased: ReadonlyMap<string, string> = new Map([
-		['vscode-ripgrep', '@vscode/ripgrep'],
+		['vscode-ripgrep', '@vscode/ripgrep-universal'],
+		['@vscode/ripgrep', '@vscode/ripgrep-universal'],
 		['vscode-windows-registry', '@vscode/windows-registry'],
 	]);
 

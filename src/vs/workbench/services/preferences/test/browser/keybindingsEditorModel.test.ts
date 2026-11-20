@@ -3,24 +3,24 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import * as uuid from 'vs/base/common/uuid';
-import { OS, OperatingSystem } from 'vs/base/common/platform';
-import { KeyCode } from 'vs/base/common/keyCodes';
-import { KeyCodeChord } from 'vs/base/common/keybindings';
-import { CommandsRegistry } from 'vs/platform/commands/common/commands';
-import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
-import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
-import { ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
-import { KeybindingsEditorModel } from 'vs/workbench/services/preferences/browser/keybindingsEditorModel';
-import { ResolvedKeybindingItem } from 'vs/platform/keybinding/common/resolvedKeybindingItem';
-import { USLayoutResolvedKeybinding } from 'vs/platform/keybinding/common/usLayoutResolvedKeybinding';
+import assert from 'assert';
+import * as uuid from '../../../../../base/common/uuid.js';
+import { OS, OperatingSystem } from '../../../../../base/common/platform.js';
+import { KeyCode } from '../../../../../base/common/keyCodes.js';
+import { KeyCodeChord } from '../../../../../base/common/keybindings.js';
+import { CommandsRegistry } from '../../../../../platform/commands/common/commands.js';
+import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
+import { IExtensionService } from '../../../extensions/common/extensions.js';
+import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
+import { KeybindingsEditorModel } from '../../browser/keybindingsEditorModel.js';
+import { ResolvedKeybindingItem } from '../../../../../platform/keybinding/common/resolvedKeybindingItem.js';
+import { USLayoutResolvedKeybinding } from '../../../../../platform/keybinding/common/usLayoutResolvedKeybinding.js';
 
-import { TestInstantiationService } from 'vs/platform/instantiation/test/common/instantiationServiceMock';
-import { IKeybindingItemEntry } from 'vs/workbench/services/preferences/common/preferences';
-import { Action2, MenuRegistry, registerAction2 } from 'vs/platform/actions/common/actions';
-import { ExtensionIdentifier, IExtensionDescription } from 'vs/platform/extensions/common/extensions';
-import { ensureNoDisposablesAreLeakedInTestSuite } from 'vs/base/test/common/utils';
+import { TestInstantiationService } from '../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
+import { IKeybindingItemEntry } from '../../common/preferences.js';
+import { Action2, MenuRegistry, registerAction2 } from '../../../../../platform/actions/common/actions.js';
+import { ExtensionIdentifier, IExtensionDescription } from '../../../../../platform/extensions/common/extensions.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 
 interface Modifiers {
 	metaKey?: boolean;
@@ -41,9 +41,9 @@ suite('KeybindingsEditorModel', () => {
 		instantiationService = disposables.add(new TestInstantiationService());
 
 		instantiationService.stub(IKeybindingService, {});
-		instantiationService.stub(IExtensionService, <Partial<IExtensionService>>{
+		instantiationService.stub(IExtensionService, {
 			whenInstalledExtensionsRegistered: () => Promise.resolve(true),
-			get extensions() { return extensions; }
+			get extensions() { return extensions as IExtensionDescription[]; }
 		});
 		testObject = disposables.add(instantiationService.createInstance(KeybindingsEditorModel, OS));
 
@@ -71,6 +71,16 @@ suite('KeybindingsEditorModel', () => {
 		await testObject.resolve(new Map<string, string>());
 		const actuals = asResolvedKeybindingItems(testObject.fetch(''));
 		assertKeybindingItems(actuals, [expected[0]]);
+	});
+
+	test('fetch keeps bindings with different system-wide scope distinct', async () => {
+		const keybinding = aResolvedKeybindingItem({ command: 'scope.' + uuid.generateUuid(), firstChord: { keyCode: KeyCode.Escape }, isDefault: false });
+		const systemWideKeybinding = new ResolvedKeybindingItem(keybinding.resolvedKeybinding, keybinding.command, keybinding.commandArgs, keybinding.when, false, null, false, true);
+		prepareKeybindingService(keybinding, systemWideKeybinding);
+
+		await testObject.resolve();
+
+		assert.deepStrictEqual(testObject.fetch('').filter(entry => entry.keybindingItem.command === keybinding.command).map(entry => entry.keybindingItem.keybindingItem.systemWide).sort(), [false, true]);
 	});
 
 	test('fetch returns default keybindings at the top', async () => {
@@ -140,7 +150,6 @@ suite('KeybindingsEditorModel', () => {
 		);
 
 		registerCommandWithTitle(keybindings[1].command!, 'Same Title');
-		registerCommandWithTitle(keybindings[3].command!, 'Same Title');
 		const expected = [keybindings[3], keybindings[1], keybindings[0], keybindings[2]];
 
 		await testObject.resolve(new Map<string, string>());
@@ -215,7 +224,7 @@ suite('KeybindingsEditorModel', () => {
 	});
 
 	test('filter by command id', async () => {
-		const id = 'workbench.action.increaseViewSize';
+		const id = 'workbench.action.view.size.' + uuid.generateUuid();
 		registerCommandWithTitle(id, 'some title');
 		prepareKeybindingService();
 
@@ -728,7 +737,7 @@ suite('KeybindingsEditorModel', () => {
 		assert.strictEqual(actual.command, expected.command);
 		if (actual.when) {
 			assert.ok(!!expected.when);
-			assert.strictEqual(actual.when.serialize(), expected.when!.serialize());
+			assert.strictEqual(actual.when.serialize(), expected.when.serialize());
 		} else {
 			assert.ok(!expected.when);
 		}
@@ -736,7 +745,7 @@ suite('KeybindingsEditorModel', () => {
 
 		if (actual.resolvedKeybinding) {
 			assert.ok(!!expected.resolvedKeybinding);
-			assert.strictEqual(actual.resolvedKeybinding.getLabel(), expected.resolvedKeybinding!.getLabel());
+			assert.strictEqual(actual.resolvedKeybinding.getLabel(), expected.resolvedKeybinding.getLabel());
 		} else {
 			assert.ok(!expected.resolvedKeybinding);
 		}

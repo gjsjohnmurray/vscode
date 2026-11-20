@@ -3,96 +3,49 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { localize } from 'vs/nls';
-import { Disposable } from 'vs/base/common/lifecycle';
-import { SyncDescriptor } from 'vs/platform/instantiation/common/descriptors';
-import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
-import { Registry } from 'vs/platform/registry/common/platform';
-import { EditorPaneDescriptor, IEditorPaneRegistry } from 'vs/workbench/browser/editor';
-import { Extensions as WorkbenchExtensions, IWorkbenchContributionsRegistry } from 'vs/workbench/common/contributions';
-import { DEFAULT_EDITOR_ASSOCIATION, EditorExtensions, EditorInputWithOptions, IEditorFactoryRegistry, IEditorSerializer, IResourceMultiDiffEditorInput } from 'vs/workbench/common/editor';
-import { EditorInput } from 'vs/workbench/common/editor/editorInput';
-import { IEditorResolverService, RegisteredEditorPriority } from 'vs/workbench/services/editor/common/editorResolverService';
-import { LifecyclePhase } from 'vs/workbench/services/lifecycle/common/lifecycle';
-import { parse } from 'vs/base/common/marshalling';
-import { onUnexpectedError } from 'vs/base/common/errors';
-import { MultiDiffEditorInput, MultiDiffEditorInputData } from 'vs/workbench/contrib/multiDiffEditor/browser/multiDiffEditorInput';
-import { MultiDiffEditor } from 'vs/workbench/contrib/multiDiffEditor/browser/multiDiffEditor';
+import { localize } from '../../../../nls.js';
+import { registerAction2 } from '../../../../platform/actions/common/actions.js';
+import { SyncDescriptor } from '../../../../platform/instantiation/common/descriptors.js';
+import { Registry } from '../../../../platform/registry/common/platform.js';
+import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../browser/editor.js';
+import { WorkbenchPhase, registerWorkbenchContribution2 } from '../../../common/contributions.js';
+import { EditorExtensions, IEditorFactoryRegistry } from '../../../common/editor.js';
+import { MultiDiffEditor } from './multiDiffEditor.js';
+import { MultiDiffEditorInput, MultiDiffEditorResolverContribution, MultiDiffEditorSerializer } from './multiDiffEditorInput.js';
+import { CollapseAllAction, ExpandAllAction, FocusFileListAction, GoToFileAction, GoToNextChangeAction, GoToPreviousChangeAction, OpenMultiDiffEditorLayoutDebugAction, PositionFileListLeftAction, PositionFileListRightAction, ToggleFileListAction, ViewFileListAsListAction, ViewFileListAsTreeAction } from './actions.js';
+import { IMultiDiffSourceResolverService, MultiDiffSourceResolverService } from './multiDiffSourceResolverService.js';
+import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
+import { OpenScmGroupAction, ScmMultiDiffSourceResolverContribution } from './scmMultiDiffSourceResolver.js';
+import './multiDiffEditorAccessibilityHelp.js';
 
-class MultiDiffEditorResolverContribution extends Disposable {
+registerAction2(GoToFileAction);
+registerAction2(GoToNextChangeAction);
+registerAction2(GoToPreviousChangeAction);
+registerAction2(FocusFileListAction);
+registerAction2(ToggleFileListAction);
+registerAction2(ViewFileListAsTreeAction);
+registerAction2(ViewFileListAsListAction);
+registerAction2(PositionFileListLeftAction);
+registerAction2(PositionFileListRightAction);
+registerAction2(CollapseAllAction);
+registerAction2(ExpandAllAction);
+registerAction2(OpenMultiDiffEditorLayoutDebugAction);
 
-	constructor(
-		@IEditorResolverService editorResolverService: IEditorResolverService,
-		@IInstantiationService instantiationService: IInstantiationService,
-	) {
-		super();
 
-		this._register(editorResolverService.registerEditor(
-			`*`,
-			{
-				id: DEFAULT_EDITOR_ASSOCIATION.id,
-				label: DEFAULT_EDITOR_ASSOCIATION.displayName,
-				detail: DEFAULT_EDITOR_ASSOCIATION.providerDisplayName,
-				priority: RegisteredEditorPriority.builtin
-			},
-			{},
-			{
-				createMultiDiffEditorInput: (diffListEditor: IResourceMultiDiffEditorInput): EditorInputWithOptions => {
-					return {
-						editor: instantiationService.createInstance(
-							MultiDiffEditorInput,
-							diffListEditor.label,
-							diffListEditor.resources.map(resource => {
-								return new MultiDiffEditorInputData(
-									resource.resource,
-									resource.original.resource,
-									resource.modified.resource
-								);
-							}))
-					};
-				}
-			}
-		));
-	}
-}
+registerSingleton(IMultiDiffSourceResolverService, MultiDiffSourceResolverService, InstantiationType.Delayed);
 
-Registry
-	.as<IWorkbenchContributionsRegistry>(WorkbenchExtensions.Workbench)
-	.registerWorkbenchContribution(MultiDiffEditorResolverContribution, LifecyclePhase.Starting);
+// Editor Integration
+registerWorkbenchContribution2(MultiDiffEditorResolverContribution.ID, MultiDiffEditorResolverContribution, WorkbenchPhase.BlockStartup /* only registering an editor resolver */);
 
-class MultiDiffEditorSerializer implements IEditorSerializer {
+Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane)
+	.registerEditorPane(
+		EditorPaneDescriptor.create(MultiDiffEditor, MultiDiffEditor.ID, localize('name', "Multi Diff Editor")),
+		[new SyncDescriptor(MultiDiffEditorInput)]
+	);
 
-	canSerialize(editor: EditorInput): boolean {
-		return true;
-	}
+Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory)
+	.registerEditorSerializer(MultiDiffEditorInput.ID, MultiDiffEditorSerializer);
 
-	serialize(editor: MultiDiffEditorInput): string | undefined {
-		return JSON.stringify({ label: editor.label, resources: editor.resources });
-	}
-
-	deserialize(instantiationService: IInstantiationService, serializedEditor: string): EditorInput | undefined {
-		try {
-			const data = parse(serializedEditor) as { label: string | undefined; resources: MultiDiffEditorInputData[] };
-			return instantiationService.createInstance(MultiDiffEditorInput, data.label, data.resources);
-		} catch (err) {
-			onUnexpectedError(err);
-			return undefined;
-		}
-	}
-}
-
-Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane(
-	EditorPaneDescriptor.create(
-		MultiDiffEditor,
-		MultiDiffEditor.ID,
-		localize('name', "Multi Diff Editor")
-	),
-	[
-		new SyncDescriptor(MultiDiffEditorInput)
-	]
-);
-
-Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEditorSerializer(
-	MultiDiffEditorInput.ID,
-	MultiDiffEditorSerializer
-);
+// SCM integration
+registerAction2(OpenScmGroupAction);
+registerWorkbenchContribution2(ScmMultiDiffSourceResolverContribution.ID, ScmMultiDiffSourceResolverContribution, WorkbenchPhase.BlockStartup /* only registering an editor resolver  */);

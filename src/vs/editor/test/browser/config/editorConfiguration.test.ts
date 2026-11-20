@@ -3,18 +3,24 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import { ensureNoDisposablesAreLeakedInTestSuite } from 'vs/base/test/common/utils';
-import { IEnvConfiguration } from 'vs/editor/browser/config/editorConfiguration';
-import { migrateOptions } from 'vs/editor/browser/config/migrateOptions';
-import { ConfigurationChangedEvent, EditorOption, IEditorHoverOptions, IQuickSuggestionsOptions } from 'vs/editor/common/config/editorOptions';
-import { EditorZoom } from 'vs/editor/common/config/editorZoom';
-import { TestConfiguration } from 'vs/editor/test/browser/config/testConfiguration';
-import { AccessibilitySupport } from 'vs/platform/accessibility/common/accessibility';
+import assert from 'assert';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
+import { IEnvConfiguration } from '../../../browser/config/editorConfiguration.js';
+import { migrateOptions } from '../../../browser/config/migrateOptions.js';
+import { TabFocus } from '../../../browser/config/tabFocus.js';
+import { ConfigurationChangedEvent, EditorOption, IEditorHoverOptions, IQuickSuggestionsOptions } from '../../../common/config/editorOptions.js';
+import { EditorZoom } from '../../../common/config/editorZoom.js';
+import { TestConfiguration } from './testConfiguration.js';
+import { AccessibilitySupport } from '../../../../platform/accessibility/common/accessibility.js';
 
 suite('Common Editor Config', () => {
 
-	ensureNoDisposablesAreLeakedInTestSuite();
+	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
+
+	// The editor zoom level is global, so restore it for the tests that run later
+	let zoomLevel: number;
+	setup(() => zoomLevel = EditorZoom.getZoomLevel());
+	teardown(() => EditorZoom.setZoomLevel(zoomLevel));
 
 	test('Zoom Level', () => {
 
@@ -66,7 +72,8 @@ suite('Common Editor Config', () => {
 				outerHeight: 100,
 				emptySelectionClipboard: true,
 				pixelRatio: 1,
-				accessibilitySupport: AccessibilitySupport.Unknown
+				accessibilitySupport: AccessibilitySupport.Unknown,
+				editContextSupported: true,
 			};
 		}
 	}
@@ -86,6 +93,7 @@ suite('Common Editor Config', () => {
 
 	test('wordWrap compat false', () => {
 		const config = new TestWrappingConfiguration({
+			// eslint-disable-next-line local/code-no-any-casts
 			wordWrap: <any>false
 		});
 		assertWrapping(config, false, -1);
@@ -94,6 +102,7 @@ suite('Common Editor Config', () => {
 
 	test('wordWrap compat true', () => {
 		const config = new TestWrappingConfiguration({
+			// eslint-disable-next-line local/code-no-any-casts
 			wordWrap: <any>true
 		});
 		assertWrapping(config, true, 80);
@@ -201,13 +210,13 @@ suite('Common Editor Config', () => {
 		const hoverOptions: IEditorHoverOptions = {};
 		Object.defineProperty(hoverOptions, 'enabled', {
 			writable: false,
-			value: true
+			value: 'on'
 		});
 		const config = new TestConfiguration({ hover: hoverOptions });
 
-		assert.strictEqual(config.options.get(EditorOption.hover).enabled, true);
-		config.updateOptions({ hover: { enabled: false } });
-		assert.strictEqual(config.options.get(EditorOption.hover).enabled, false);
+		assert.strictEqual(config.options.get(EditorOption.hover).enabled, 'on');
+		config.updateOptions({ hover: { enabled: 'off' } });
+		assert.strictEqual(config.options.get(EditorOption.hover).enabled, 'off');
 
 		config.dispose();
 	});
@@ -229,7 +238,7 @@ suite('Common Editor Config', () => {
 		const config = new TestConfiguration({ quickSuggestions: null! });
 		const actual = <Readonly<Required<IQuickSuggestionsOptions>>>config.options.get(EditorOption.quickSuggestions);
 		assert.deepStrictEqual(actual, {
-			other: 'on',
+			other: 'offWhenInlineCompletions',
 			comments: 'off',
 			strings: 'off'
 		});
@@ -241,7 +250,7 @@ suite('Common Editor Config', () => {
 		config.updateOptions({ quickSuggestions: { strings: true } });
 		const actual = <Readonly<Required<IQuickSuggestionsOptions>>>config.options.get(EditorOption.quickSuggestions);
 		assert.deepStrictEqual(actual, {
-			other: 'on',
+			other: 'offWhenInlineCompletions',
 			comments: 'off',
 			strings: 'on'
 		});
@@ -254,16 +263,69 @@ suite('Common Editor Config', () => {
 		const actual = config.options.get(EditorOption.unicodeHighlighting);
 		assert.deepStrictEqual(actual,
 			{
-				nonBasicASCII: "inUntrustedWorkspace",
+				nonBasicASCII: 'inUntrustedWorkspace',
 				invisibleCharacters: true,
 				ambiguousCharacters: true,
-				includeComments: "inUntrustedWorkspace",
-				includeStrings: "inUntrustedWorkspace",
-				allowedCharacters: { "x": true },
-				allowedLocales: { "_os": true, "_vscode": true }
+				includeComments: 'inUntrustedWorkspace',
+				includeStrings: 'inUntrustedWorkspace',
+				allowedCharacters: { 'x': true },
+				allowedLocales: { '_os': true, '_vscode': true }
 			}
 		);
 		config.dispose();
+	});
+
+	suite('tabFocusMode', () => {
+		let originalTabFocusMode: boolean;
+		setup(() => originalTabFocusMode = TabFocus.getTabFocusMode());
+		teardown(() => TabFocus.setTabFocusMode(originalTabFocusMode));
+
+		test('inherits the global mode unless explicitly enabled', () => {
+			TabFocus.setTabFocusMode(true);
+			const configs = [undefined, false, true].map(tabFocusMode => disposables.add(new TestConfiguration({ tabFocusMode })));
+			const initialValues = configs.map(config => config.options.get(EditorOption.tabFocusMode));
+			const changes = configs.map(config => {
+				const changes: { changed: boolean; value: boolean }[] = [];
+				disposables.add(config.onDidChange(e => changes.push({
+					changed: e.hasChanged(EditorOption.tabFocusMode),
+					value: config.options.get(EditorOption.tabFocusMode)
+				})));
+				return changes;
+			});
+
+			TabFocus.setTabFocusMode(false);
+			TabFocus.setTabFocusMode(false);
+			TabFocus.setTabFocusMode(true);
+			TabFocus.setTabFocusMode(true);
+
+			const expectedChanges = [{ changed: true, value: false }, { changed: true, value: true }];
+			assert.deepStrictEqual({ initialValues, changes }, {
+				initialValues: [true, true, true],
+				changes: [expectedChanges, expectedChanges, []]
+			});
+		});
+
+		test('emits only effective changes when updating the editor option', () => {
+			TabFocus.setTabFocusMode(true);
+			const config = disposables.add(new TestConfiguration({ tabFocusMode: false }));
+			const changes: { changed: boolean; value: boolean }[] = [];
+			disposables.add(config.onDidChange(e => changes.push({
+				changed: e.hasChanged(EditorOption.tabFocusMode),
+				value: config.options.get(EditorOption.tabFocusMode)
+			})));
+
+			config.updateOptions({ tabFocusMode: true });
+			config.updateOptions({ tabFocusMode: false });
+			TabFocus.setTabFocusMode(false);
+			config.updateOptions({ tabFocusMode: true });
+			config.updateOptions({ tabFocusMode: false });
+
+			assert.deepStrictEqual(changes, [
+				{ changed: true, value: false },
+				{ changed: true, value: true },
+				{ changed: true, value: false }
+			]);
+		});
 	});
 });
 
@@ -377,8 +439,8 @@ suite('migrateOptions', () => {
 		assert.deepStrictEqual(migrate({ quickSuggestions: { comments: 'on', strings: 'off' } }), { quickSuggestions: { comments: 'on', strings: 'off' } });
 	});
 	test('hover', () => {
-		assert.deepStrictEqual(migrate({ hover: true }), { hover: { enabled: true } });
-		assert.deepStrictEqual(migrate({ hover: false }), { hover: { enabled: false } });
+		assert.deepStrictEqual(migrate({ hover: true }), { hover: { enabled: 'on' } });
+		assert.deepStrictEqual(migrate({ hover: false }), { hover: { enabled: 'off' } });
 	});
 	test('parameterHints', () => {
 		assert.deepStrictEqual(migrate({ parameterHints: true }), { parameterHints: { enabled: true } });

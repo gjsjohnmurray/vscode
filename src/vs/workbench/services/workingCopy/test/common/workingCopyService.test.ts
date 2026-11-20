@@ -3,21 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import { IWorkingCopy } from 'vs/workbench/services/workingCopy/common/workingCopy';
-import { URI } from 'vs/base/common/uri';
-import { TestWorkingCopy } from 'vs/workbench/test/common/workbenchTestServices';
-import { IWorkingCopySaveEvent, WorkingCopyService } from 'vs/workbench/services/workingCopy/common/workingCopyService';
-import { ensureNoDisposablesAreLeakedInTestSuite } from 'vs/base/test/common/utils';
-import { DisposableStore } from 'vs/base/common/lifecycle';
+import assert from 'assert';
+import { IWorkingCopy } from '../../common/workingCopy.js';
+import { URI } from '../../../../../base/common/uri.js';
+import { TestWorkingCopy } from '../../../../test/common/workbenchTestServices.js';
+import { IWorkingCopySaveEvent, WorkingCopyService } from '../../common/workingCopyService.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 
 suite('WorkingCopyService', () => {
 
-	const disposables = new DisposableStore();
-
-	teardown(() => {
-		disposables.clear();
-	});
+	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 
 	test('registry - basics', () => {
 		const service = disposables.add(new WorkingCopyService());
@@ -214,5 +209,4 @@ suite('WorkingCopyService', () => {
 		assert.strictEqual(service.workingCopies.length, 0);
 	});
 
-	ensureNoDisposablesAreLeakedInTestSuite();
 });

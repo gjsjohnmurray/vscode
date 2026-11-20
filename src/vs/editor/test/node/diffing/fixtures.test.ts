@@ -3,17 +3,26 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
+import assert from 'assert';
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
-import { join, resolve } from 'path';
-import { setUnexpectedErrorHandler } from 'vs/base/common/errors';
-import { FileAccess } from 'vs/base/common/network';
-import { DetailedLineRangeMapping } from 'vs/editor/common/diff/rangeMapping';
-import { LegacyLinesDiffComputer } from 'vs/editor/common/diff/legacyLinesDiffComputer';
-import { DefaultLinesDiffComputer } from 'vs/editor/common/diff/defaultLinesDiffComputer/defaultLinesDiffComputer';
-import { Range } from 'vs/editor/common/core/range';
+import { join, resolve } from '../../../../base/common/path.js';
+import { setUnexpectedErrorHandler } from '../../../../base/common/errors.js';
+import { FileAccess, nodeModulesPath } from '../../../../base/common/network.js';
+import { isElectron } from '../../../../base/common/platform.js';
+import { DetailedLineRangeMapping, RangeMapping } from '../../../common/diff/rangeMapping.js';
+import { LegacyLinesDiffComputer } from '../../../common/diff/legacyLinesDiffComputer.js';
+import { DefaultLinesDiffComputer } from '../../../common/diff/defaultLinesDiffComputer/defaultLinesDiffComputer.js';
+import { Range } from '../../../common/core/range.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
+import { TextReplacement, TextEdit } from '../../../common/core/edits/textEdit.js';
+import { AbstractText, ArrayText } from '../../../common/core/text/abstractText.js';
+import { ILinesDiffComputer, LinesDiff } from '../../../common/diff/linesDiffComputer.js';
+import { verifyLinesDiff } from '../../../common/diff/verifyLinesDiff.js';
+import { createExternalLinesDiffComputer } from '../../../common/diff/externalLinesDiffComputer.js';
 
 suite('diffing fixtures', () => {
+	ensureNoDisposablesAreLeakedInTestSuite();
+
 	setup(() => {
 		setUnexpectedErrorHandler(e => {
 			throw e;
@@ -27,7 +36,7 @@ suite('diffing fixtures', () => {
 	const fixturesSrcDir = resolve(fixturesOutDir).replaceAll('\\', '/').replace('/out/vs/editor/', '/src/vs/editor/');
 	const folders = readdirSync(fixturesSrcDir);
 
-	function runTest(folder: string, diffingAlgoName: 'legacy' | 'advanced') {
+	function readFixture(folder: string) {
 		const folderPath = join(fixturesSrcDir, folder);
 		const files = readdirSync(folderPath);
 
@@ -35,16 +44,30 @@ suite('diffing fixtures', () => {
 		const secondFileName = files.find(f => f.startsWith('2.'))!;
 
 		const firstContent = readFileSync(join(folderPath, firstFileName), 'utf8').replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-		const firstContentLines = firstContent.split(/\n/);
 		const secondContent = readFileSync(join(folderPath, secondFileName), 'utf8').replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-		const secondContentLines = secondContent.split(/\n/);
+		return {
+			folderPath, firstFileName, secondFileName, firstContent, secondContent,
+			firstContentLines: firstContent.split(/\n/),
+			secondContentLines: secondContent.split(/\n/),
+			ignoreTrimWhitespace: folder.indexOf('trimws') >= 0,
+		};
+	}
+
+	function runTest(folder: string, diffingAlgoName: 'legacy' | 'advanced') {
+		const { folderPath, firstFileName, secondFileName, firstContent, secondContent, firstContentLines, secondContentLines, ignoreTrimWhitespace } = readFixture(folder);
 
 		const diffingAlgo = diffingAlgoName === 'legacy' ? new LegacyLinesDiffComputer() : new DefaultLinesDiffComputer();
-
-		const ignoreTrimWhitespace = folder.indexOf('trimws') >= 0;
 		const diff = diffingAlgo.computeDiff(firstContentLines, secondContentLines, { ignoreTrimWhitespace, maxComputationTimeMs: Number.MAX_SAFE_INTEGER, computeMoves: true });
 
+		if (diffingAlgoName === 'advanced' && !ignoreTrimWhitespace) {
+			assertDiffCorrectness(diff, firstContentLines, secondContentLines);
+		}
+
 		function getDiffs(changes: readonly DetailedLineRangeMapping[]): IDetailedDiff[] {
+			for (const c of changes) {
+				RangeMapping.assertSorted(c.innerChanges ?? []);
+			}
+
 			return changes.map<IDetailedDiff>(c => ({
 				originalRange: c.original.toString(),
 				modifiedRange: c.modified.toString(),
@@ -120,7 +143,7 @@ suite('diffing fixtures', () => {
 	}
 
 	test(`test`, () => {
-		runTest('shifting-twice', 'advanced');
+		runTest('invalid-diff-trimws', 'advanced');
 	});
 
 	for (const folder of folders) {
@@ -130,7 +153,89 @@ suite('diffing fixtures', () => {
 			});
 		}
 	}
+
+	async function loadExternalComputer(useWasm: boolean) {
+		// Import by file URL: the electron test runner cannot resolve this ESM-only package by name.
+		const externalModuleUrl = FileAccess.asFileUri(`${nodeModulesPath}/@vscode/diff/dist/index.js`).toString(true);
+		const externalModule: typeof import('@vscode/diff') = await import(externalModuleUrl);
+		return createExternalLinesDiffComputer(externalModule, useWasm);
+	}
+
+	// The wasm loader of @vscode/diff takes its node code path in the electron renderer, which cannot import `node:fs`.
+	test('all diff algorithms produce valid diffs on all fixtures', async () => {
+		const algorithms: [string, ILinesDiffComputer][] = [
+			['advanced', new DefaultLinesDiffComputer()],
+			['advanced-external', await loadExternalComputer(false)],
+			...(isElectron ? [] : [['advanced-wasm', await loadExternalComputer(true)] satisfies [string, ILinesDiffComputer]]),
+		];
+		const invalid: string[] = [];
+		for (const folder of folders) {
+			const { firstContentLines, secondContentLines } = readFixture(folder);
+			for (const [name, algorithm] of algorithms) {
+				for (const ignoreTrimWhitespace of [false, true]) {
+					const diff = algorithm.computeDiff(firstContentLines, secondContentLines, { ignoreTrimWhitespace, maxComputationTimeMs: 0, computeMoves: false });
+					const validity = verifyLinesDiff(diff, firstContentLines, secondContentLines, ignoreTrimWhitespace);
+					if (validity !== 'valid') {
+						invalid.push(`${folder} ${name} ignoreTrimWhitespace=${ignoreTrimWhitespace}: ${validity}`);
+					}
+				}
+			}
+		}
+		// Known bug of the built-in algorithm: when ignoring trim whitespace, it also hides whitespace changes inside lines that were joined.
+		assert.deepStrictEqual(invalid, [
+			'invalid-diff-bug advanced ignoreTrimWhitespace=true: invalid',
+			'invalid-diff-trimws advanced ignoreTrimWhitespace=true: invalid',
+		]);
+	});
+
+	// The TypeScript backend of @vscode/diff is a port of the built-in algorithm. Both must agree, so `advanced` can switch to it.
+	test('@vscode/diff (TS) agrees with the built-in algorithm on all fixtures', async () => {
+		const builtin = new DefaultLinesDiffComputer();
+		const external = await loadExternalComputer(false);
+		const format = (diff: LinesDiff) => [
+			...formatChanges(diff),
+			...diff.moves.map(m => `move ${m.lineRangeMapping.original}->${m.lineRangeMapping.modified} ${formatChanges({ changes: m.changes })}`),
+		];
+		const differences: string[] = [];
+		for (const folder of folders) {
+			const { firstContentLines, secondContentLines } = readFixture(folder);
+			for (const ignoreTrimWhitespace of [false, true]) {
+				const options = { ignoreTrimWhitespace, maxComputationTimeMs: 0, computeMoves: true };
+				const expected = builtin.computeDiff(firstContentLines, secondContentLines, options);
+				const actual = external.computeDiff(firstContentLines, secondContentLines, options);
+				if (!ignoreTrimWhitespace) {
+					if (JSON.stringify(format(actual)) !== JSON.stringify(format(expected))) {
+						differences.push(`${folder}: differs`);
+					}
+				} else if (JSON.stringify(expected.changes.map(c => `${c}`)) !== JSON.stringify(actual.changes.map(c => `${c}`))) {
+					// With trim whitespace ignored, the built-in algorithm ignores it while aligning lines; the package hides it afterwards.
+					differences.push(`${folder} ignoreTrimWhitespace: changed lines differ`);
+				}
+			}
+		}
+		assert.deepStrictEqual(differences, [
+			// The original is empty. The built-in algorithm replaces the empty line, the package reports a pure insertion.
+			'invalid-ranges: differs',
+			'invalid-ranges ignoreTrimWhitespace: changed lines differ',
+			'noisy-move1 ignoreTrimWhitespace: changed lines differ',
+		]);
+	});
+
+	test('@vscode/diff: ignoreTrimWhitespace hides only leading/trailing whitespace changes', async () => {
+		const external = await loadExternalComputer(false);
+		const original = ['if (a) {', '\tfoo();  ', '}', 'bar(x, y);', '  ', 'let a = 1;'];
+		const modified = ['if (a) {', '    foo();', '}', 'bar(x,  y);', '\t', 'let  a = 2;'];
+		const diff = external.computeDiff(original, modified, { ignoreTrimWhitespace: true, maxComputationTimeMs: 0, computeMoves: false });
+		assert.deepStrictEqual(formatChanges(diff), [
+			'[4,5)->[4,5) {[4,7 -> 4,7]->[4,7 -> 4,8]}',
+			'[6,7)->[6,7) {[6,4 -> 6,4]->[6,4 -> 6,5]} {[6,9 -> 6,10]->[6,10 -> 6,11]}',
+		]);
+	});
 });
+
+function formatChanges(diff: Pick<LinesDiff, 'changes'>): string[] {
+	return diff.changes.map(c => `${c.original}->${c.modified} ${c.innerChanges?.map(i => i.toString()).join(' ')}`);
+}
 
 interface DiffingResult {
 	original: { content: string; fileName: string };
@@ -156,4 +261,21 @@ interface IMoveInfo {
 	modifiedRange: string; // [startLineNumber, endLineNumberExclusive)
 
 	changes: IDetailedDiff[];
+}
+
+function assertDiffCorrectness(diff: LinesDiff, original: string[], modified: string[]) {
+	const allInnerChanges = diff.changes.flatMap(c => c.innerChanges!);
+	const edit = rangeMappingsToTextEdit(allInnerChanges, new ArrayText(modified));
+	const result = edit.normalize().apply(new ArrayText(original));
+
+	assert.deepStrictEqual(result, modified.join('\n'));
+}
+
+function rangeMappingsToTextEdit(rangeMappings: readonly RangeMapping[], modified: AbstractText): TextEdit {
+	return new TextEdit(rangeMappings.map(m => {
+		return new TextReplacement(
+			m.originalRange,
+			modified.getValueOfRange(m.modifiedRange)
+		);
+	}));
 }

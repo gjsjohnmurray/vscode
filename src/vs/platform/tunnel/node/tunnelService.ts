@@ -5,21 +5,21 @@
 
 import * as net from 'net';
 import * as os from 'os';
-import { BROWSER_RESTRICTED_PORTS, findFreePortFaster } from 'vs/base/node/ports';
-import { NodeSocket } from 'vs/base/parts/ipc/node/ipc.net';
+import { BROWSER_RESTRICTED_PORTS, findFreePortFaster } from '../../../base/node/ports.js';
+import { NodeSocket } from '../../../base/parts/ipc/node/ipc.net.js';
 
-import { Barrier } from 'vs/base/common/async';
-import { Disposable } from 'vs/base/common/lifecycle';
-import { OS } from 'vs/base/common/platform';
-import { ISocket } from 'vs/base/parts/ipc/common/ipc.net';
-import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { ILogService } from 'vs/platform/log/common/log';
-import { IProductService } from 'vs/platform/product/common/productService';
-import { IAddressProvider, IConnectionOptions, connectRemoteAgentTunnel } from 'vs/platform/remote/common/remoteAgentConnection';
-import { IRemoteSocketFactoryService } from 'vs/platform/remote/common/remoteSocketFactoryService';
-import { ISignService } from 'vs/platform/sign/common/sign';
-import { AbstractTunnelService, ISharedTunnelsService, ITunnelProvider, ITunnelService, RemoteTunnel, TunnelPrivacyId, isAllInterfaces, isLocalhost, isPortPrivileged, isTunnelProvider } from 'vs/platform/tunnel/common/tunnel';
-import { VSBuffer } from 'vs/base/common/buffer';
+import { Barrier } from '../../../base/common/async.js';
+import { Disposable } from '../../../base/common/lifecycle.js';
+import { OS } from '../../../base/common/platform.js';
+import { ISocket, SocketCloseEventType } from '../../../base/parts/ipc/common/ipc.net.js';
+import { IConfigurationService } from '../../configuration/common/configuration.js';
+import { ILogService } from '../../log/common/log.js';
+import { IProductService } from '../../product/common/productService.js';
+import { IAddressProvider, IConnectionOptions, connectRemoteAgentTunnel } from '../../remote/common/remoteAgentConnection.js';
+import { IRemoteSocketFactoryService } from '../../remote/common/remoteSocketFactoryService.js';
+import { ISignService } from '../../sign/common/sign.js';
+import { AbstractTunnelService, ISharedTunnelsService, ITunnelProvider, ITunnelService, RemoteTunnel, TunnelPrivacyId, isAllInterfaces, isLocalhost, isPortPrivileged, isTunnelProvider } from '../common/tunnel.js';
+import { VSBuffer } from '../../../base/common/buffer.js';
 
 async function createRemoteTunnel(options: IConnectionOptions, defaultTunnelHost: string, tunnelRemoteHost: string, tunnelRemotePort: number, tunnelLocalPort?: number): Promise<RemoteTunnel> {
 	let readyTunnel: NodeRemoteTunnel | undefined;
@@ -50,7 +50,7 @@ export class NodeRemoteTunnel extends Disposable implements RemoteTunnel {
 	private readonly _connectionListener: (socket: net.Socket) => void;
 	private readonly _errorListener: () => void;
 
-	private readonly _socketsDispose: Map<string, () => void> = new Map();
+	private readonly _socketsDispose: Map<net.Socket, () => void> = new Map();
 
 	constructor(options: IConnectionOptions, private readonly defaultTunnelHost: string, tunnelRemoteHost: string, tunnelRemotePort: number, private readonly suggestedLocalPort?: number) {
 		super();
@@ -123,17 +123,12 @@ export class NodeRemoteTunnel extends Disposable implements RemoteTunnel {
 			localSocket.write(dataChunk.buffer);
 		}
 
-		localSocket.on('end', () => {
-			if (localSocket.localAddress) {
-				this._socketsDispose.delete(localSocket.localAddress);
-			}
+		localSocket.on('end', () => remoteSocket.end());
+		localSocket.on('close', () => {
+			this._socketsDispose.delete(localSocket);
 			remoteSocket.end();
 		});
-		localSocket.on('close', () => remoteSocket.end());
 		localSocket.on('error', () => {
-			if (localSocket.localAddress) {
-				this._socketsDispose.delete(localSocket.localAddress);
-			}
 			if (remoteSocket instanceof NodeSocket) {
 				remoteSocket.socket.destroy();
 			} else {
@@ -147,8 +142,8 @@ export class NodeRemoteTunnel extends Disposable implements RemoteTunnel {
 			this._mirrorGenericSocket(localSocket, remoteSocket);
 		}
 
-		if (localSocket.localAddress) {
-			this._socketsDispose.set(localSocket.localAddress, () => {
+		if (!localSocket.destroyed) {
+			this._socketsDispose.set(localSocket, () => {
 				// Need to end instead of unpipe, otherwise whatever is connected locally could end up "stuck" with whatever state it had until manually exited.
 				localSocket.end();
 				remoteSocket.end();
@@ -157,7 +152,14 @@ export class NodeRemoteTunnel extends Disposable implements RemoteTunnel {
 	}
 
 	private _mirrorGenericSocket(localSocket: net.Socket, remoteSocket: ISocket) {
-		remoteSocket.onClose(() => localSocket.destroy());
+		remoteSocket.onClose(e => {
+			// Abort on error so the local client can't mistake a truncated stream for a complete one; otherwise flush buffered data.
+			if (e?.type === SocketCloseEventType.NodeSocketCloseEvent && e.hadError) {
+				localSocket.destroy();
+			} else {
+				localSocket.end();
+			}
+		});
 		remoteSocket.onEnd(() => localSocket.end());
 		remoteSocket.onData(d => localSocket.write(d.buffer));
 		localSocket.on('data', d => remoteSocket.write(VSBuffer.wrap(d)));

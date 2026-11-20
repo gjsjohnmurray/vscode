@@ -3,13 +3,26 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import { ensureNoDisposablesAreLeakedInTestSuite } from 'vs/base/test/common/utils';
-import { IConfig } from 'vs/workbench/contrib/debug/common/debug';
-import { formatPII, getExactExpressionStartAndEnd, getVisibleAndSorted } from 'vs/workbench/contrib/debug/common/debugUtils';
+import assert from 'assert';
+import { Emitter } from '../../../../../base/common/event.js';
+import { OperatingSystem } from '../../../../../base/common/platform.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { IConfig, IDebugSession } from '../../common/debug.js';
+import { formatPII, getEffectiveConfigForPlatform, getEffectivePresentationForConfig, getExactExpressionStartAndEnd, getVisibleAndSorted, stopSessionsAndWaitForEnd } from '../../common/debugUtils.js';
+
+function platformSection(os: OperatingSystem, value: NonNullable<IConfig['windows']>): Pick<IConfig, 'windows' | 'osx' | 'linux'> {
+	switch (os) {
+		case OperatingSystem.Windows:
+			return { windows: value };
+		case OperatingSystem.Macintosh:
+			return { osx: value };
+		case OperatingSystem.Linux:
+			return { linux: value };
+	}
+}
 
 suite('Debug - Utils', () => {
-	ensureNoDisposablesAreLeakedInTestSuite();
+	const ds = ensureNoDisposablesAreLeakedInTestSuite();
 
 	test('formatPII', () => {
 		assert.strictEqual(formatPII('Foo Bar', false, {}), 'Foo Bar');
@@ -25,6 +38,7 @@ suite('Debug - Utils', () => {
 
 	test('getExactExpressionStartAndEnd', () => {
 		assert.deepStrictEqual(getExactExpressionStartAndEnd('foo', 1, 2), { start: 1, end: 3 });
+		assert.deepStrictEqual(getExactExpressionStartAndEnd('!foo', 2, 3), { start: 2, end: 4 });
 		assert.deepStrictEqual(getExactExpressionStartAndEnd('foo', 1, 3), { start: 1, end: 3 });
 		assert.deepStrictEqual(getExactExpressionStartAndEnd('foo', 1, 4), { start: 1, end: 3 });
 		assert.deepStrictEqual(getExactExpressionStartAndEnd('this.name = "John"', 1, 10), { start: 1, end: 9 });
@@ -41,6 +55,63 @@ suite('Debug - Utils', () => {
 
 		assert.deepStrictEqual(getExactExpressionStartAndEnd('var t = a.b;c.d.name', 16, 20), { start: 13, end: 20 });
 		assert.deepStrictEqual(getExactExpressionStartAndEnd('var t = a.b.c-d.name', 16, 20), { start: 15, end: 20 });
+
+		assert.deepStrictEqual(getExactExpressionStartAndEnd('var aøñéå文 = a.b.c-d.name', 5, 5), { start: 5, end: 10 });
+		assert.deepStrictEqual(getExactExpressionStartAndEnd('aøñéå文.aøñéå文.aøñéå文', 9, 9), { start: 1, end: 13 });
+
+		// Spread syntax should extract just the identifier
+		assert.deepStrictEqual(getExactExpressionStartAndEnd('[...bar]', 5, 7), { start: 5, end: 7 });
+		assert.deepStrictEqual(getExactExpressionStartAndEnd('...variable', 5, 5), { start: 4, end: 11 });
+	});
+
+	test('getEffectivePresentationForConfig - platform override', () => {
+		// No platform override: returns base presentation
+		const config1: IConfig = { type: 'node', request: 'launch', name: 'a', presentation: { hidden: false } };
+		assert.deepStrictEqual(getEffectivePresentationForConfig(config1, OperatingSystem.Macintosh), { hidden: false });
+
+		// Platform-specific presentation overrides base hidden value
+		const config2: IConfig = {
+			type: 'node', request: 'launch', name: 'b',
+			presentation: { hidden: false },
+			...platformSection(OperatingSystem.Windows, { presentation: { hidden: true } })
+		};
+		assert.deepStrictEqual(getEffectivePresentationForConfig(config2, OperatingSystem.Windows), { hidden: true });
+
+		// Non-matching platform override does not affect result
+		const config3: IConfig = {
+			type: 'node', request: 'launch', name: 'c',
+			presentation: { hidden: false },
+			...platformSection(OperatingSystem.Windows, { presentation: { hidden: true } })
+		};
+		assert.deepStrictEqual(getEffectivePresentationForConfig(config3, OperatingSystem.Linux), { hidden: false });
+
+		// No base presentation, platform-specific sets hidden
+		const config4: IConfig = {
+			type: 'node', request: 'launch', name: 'd',
+			...platformSection(OperatingSystem.Macintosh, { presentation: { hidden: true } })
+		};
+		assert.deepStrictEqual(getEffectivePresentationForConfig(config4, OperatingSystem.Macintosh), { hidden: true });
+
+		// Platform-specific merges with base (group and order preserved)
+		const config5: IConfig = {
+			type: 'node', request: 'launch', name: 'e',
+			presentation: { group: 'myGroup', order: 2 },
+			...platformSection(OperatingSystem.Linux, { presentation: { hidden: true } })
+		};
+		assert.deepStrictEqual(getEffectivePresentationForConfig(config5, OperatingSystem.Linux), { group: 'myGroup', order: 2, hidden: true });
+
+		// Platform-specific config overrides other launch attributes while preserving nested sections
+		const config6: IConfig = {
+			type: 'node', request: 'launch', name: 'f',
+			preLaunchTask: 'base-task',
+			presentation: { group: 'base' },
+			...platformSection(OperatingSystem.Windows, { preLaunchTask: 'windows-task', presentation: { hidden: true } })
+		};
+		assert.deepStrictEqual(getEffectiveConfigForPlatform(config6, OperatingSystem.Windows), {
+			...config6,
+			preLaunchTask: 'windows-task',
+			presentation: { group: 'base', hidden: true }
+		});
 	});
 
 	test('config presentation', () => {
@@ -136,5 +207,45 @@ suite('Debug - Utils', () => {
 		assert.strictEqual(sorted[7].name, 'p');
 		assert.strictEqual(sorted[8].name, 'a');
 
+	});
+
+	suite('stopSessionsAndWaitForEnd', () => {
+		function setup() {
+			const session = {} as IDebugSession;
+			const onDidEndSession = ds.add(new Emitter<{ readonly session: IDebugSession; readonly restart: boolean }>());
+			const log: string[] = [];
+			const ended = new Set<IDebugSession>();
+			return { session, onDidEndSession, log, ended, hasEnded: (s: IDebugSession) => ended.has(s) };
+		}
+
+		test('waits for the session to end after stopping it', async () => {
+			const { session, onDidEndSession, log, hasEnded } = setup();
+			const done = stopSessionsAndWaitForEnd([session], async () => { log.push('stopped'); }, onDidEndSession.event, hasEnded).then(() => log.push('done'));
+			await Promise.resolve();
+			await Promise.resolve();
+			onDidEndSession.fire({ session: {} as IDebugSession, restart: false });
+			onDidEndSession.fire({ session, restart: true });
+			await Promise.resolve();
+			assert.deepStrictEqual(log, ['stopped']);
+			onDidEndSession.fire({ session, restart: false });
+			await done;
+			assert.deepStrictEqual(log, ['stopped', 'done']);
+		});
+
+		test('does not wait for a session that ended already, before or while stopping it', async () => {
+			const before = setup();
+			before.ended.add(before.session);
+			await stopSessionsAndWaitForEnd([before.session], async () => { before.log.push('stopped'); }, before.onDidEndSession.event, before.hasEnded);
+
+			const during = setup();
+			await stopSessionsAndWaitForEnd([during.session], async () => { during.ended.add(during.session); }, during.onDidEndSession.event, during.hasEnded);
+
+			assert.deepStrictEqual({ before: before.log, during: during.log }, { before: [], during: [] });
+		});
+
+		test('rejects when stopping a session fails', async () => {
+			const { session, onDidEndSession, hasEnded } = setup();
+			await assert.rejects(() => stopSessionsAndWaitForEnd([session], async () => { throw new Error('cannot stop'); }, onDidEndSession.event, hasEnded), /cannot stop/);
+		});
 	});
 });

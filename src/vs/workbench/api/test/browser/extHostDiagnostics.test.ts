@@ -3,27 +3,27 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import { URI, UriComponents } from 'vs/base/common/uri';
-import { DiagnosticCollection, ExtHostDiagnostics } from 'vs/workbench/api/common/extHostDiagnostics';
-import { Diagnostic, DiagnosticSeverity, Range, DiagnosticRelatedInformation, Location } from 'vs/workbench/api/common/extHostTypes';
-import { MainThreadDiagnosticsShape, IMainContext } from 'vs/workbench/api/common/extHost.protocol';
-import { IMarkerData, MarkerSeverity } from 'vs/platform/markers/common/markers';
-import { mock } from 'vs/base/test/common/mock';
-import { Emitter, Event } from 'vs/base/common/event';
-import { NullLogService } from 'vs/platform/log/common/log';
+import assert from 'assert';
+import { URI, UriComponents } from '../../../../base/common/uri.js';
+import { DiagnosticCollection, ExtHostDiagnostics } from '../../common/extHostDiagnostics.js';
+import { Diagnostic, DiagnosticSeverity, Range, DiagnosticRelatedInformation, Location } from '../../common/extHostTypes.js';
+import { IMarkerChange, MainThreadDiagnosticsShape, IMainContext } from '../../common/extHost.protocol.js';
+import { IMarkerData, MarkerSeverity } from '../../../../platform/markers/common/markers.js';
+import { mock } from '../../../../base/test/common/mock.js';
+import { Emitter, Event } from '../../../../base/common/event.js';
+import { NullLogService } from '../../../../platform/log/common/log.js';
 import type * as vscode from 'vscode';
-import { nullExtensionDescription } from 'vs/workbench/services/extensions/common/extensions';
-import { ExtUri, extUri } from 'vs/base/common/resources';
-import { IExtHostFileSystemInfo } from 'vs/workbench/api/common/extHostFileSystemInfo';
-import { runWithFakedTimers } from 'vs/base/test/common/timeTravelScheduler';
-import { IExtHostDocumentsAndEditors } from 'vs/workbench/api/common/extHostDocumentsAndEditors';
-import { ensureNoDisposablesAreLeakedInTestSuite } from 'vs/base/test/common/utils';
+import { nullExtensionDescription } from '../../../services/extensions/common/extensions.js';
+import { ExtUri, extUri } from '../../../../base/common/resources.js';
+import { IExtHostFileSystemInfo } from '../../common/extHostFileSystemInfo.js';
+import { runWithFakedTimers } from '../../../../base/test/common/timeTravelScheduler.js';
+import { IExtHostDocumentsAndEditors } from '../../common/extHostDocumentsAndEditors.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 
 suite('ExtHostDiagnostics', () => {
 
 	class DiagnosticsShape extends mock<MainThreadDiagnosticsShape>() {
-		override $changeMany(owner: string, entries: [UriComponents, IMarkerData[]][]): void {
+		override $changeMany(owner: string, entries: IMarkerChange[]): void {
 			//
 		}
 		override $clear(owner: string): void {
@@ -277,9 +277,9 @@ suite('ExtHostDiagnostics', () => {
 
 	test('diagnostic capping (max per file)', function () {
 
-		let lastEntries!: [UriComponents, IMarkerData[]][];
+		let lastEntries!: [UriComponents, IMarkerData[], isTruncated?: boolean][];
 		const collection = new DiagnosticCollection('test', 'test', 100, 250, versionProvider, extUri, new class extends DiagnosticsShape {
-			override $changeMany(owner: string, entries: [UriComponents, IMarkerData[]][]): void {
+			override $changeMany(owner: string, entries: [UriComponents, IMarkerData[], isTruncated?: boolean][]): void {
 				lastEntries = entries;
 				return super.$changeMany(owner, entries);
 			}
@@ -300,6 +300,7 @@ suite('ExtHostDiagnostics', () => {
 		assert.strictEqual(lastEntries[0][1][0].severity, MarkerSeverity.Error);
 		assert.strictEqual(lastEntries[0][1][200].severity, MarkerSeverity.Warning);
 		assert.strictEqual(lastEntries[0][1][250].severity, MarkerSeverity.Info);
+		assert.strictEqual(lastEntries[0][2], true);
 	});
 
 	test('diagnostic capping (max files)', function () {
@@ -471,6 +472,39 @@ suite('ExtHostDiagnostics', () => {
 		array.push(diag2);
 		collection.set(URI.parse('test:me'), array);
 		assert.strictEqual(callCount, 3); // same but un-equal array
+	});
+
+	test('getDiagnostics does not tolerate sparse diagnostic arrays', function () {
+		const diags = new ExtHostDiagnostics(new class implements IMainContext {
+			getProxy(): any {
+				return new DiagnosticsShape();
+			}
+			set(): any {
+				return null;
+			}
+			dispose(): void { }
+			assertRegistered(): void { }
+			drain() {
+				return undefined!;
+			}
+		}, new NullLogService(), fileSystemInfoService, new class extends mock<IExtHostDocumentsAndEditors>() {
+			override getDocument() {
+				return undefined;
+			}
+		});
+
+		const collection = diags.createDiagnosticCollection(nullExtensionDescription.identifier, 'sparse');
+		const uri = URI.parse('sparse:uri');
+		const diag = new Diagnostic(new Range(0, 0, 0, 0), 'holey');
+		const sparseDiagnostics: Diagnostic[] = new Array(3);
+		sparseDiagnostics[1] = diag;
+
+		collection.set(uri, sparseDiagnostics);
+
+		const result = diags.getDiagnostics(uri);
+		assert.strictEqual(result.length, 1);
+		const resultWithPossibleHoles = [...result] as (vscode.Diagnostic | undefined)[];
+		assert.strictEqual(resultWithPossibleHoles.some(item => item === undefined), false);
 	});
 
 	test('Version id is set whenever possible', function () {

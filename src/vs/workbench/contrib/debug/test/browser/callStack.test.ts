@@ -3,37 +3,41 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
+import assert from 'assert';
 import * as sinon from 'sinon';
-import { DisposableStore } from 'vs/base/common/lifecycle';
-import { ThemeIcon } from 'vs/base/common/themables';
-import { Constants } from 'vs/base/common/uint';
-import { generateUuid } from 'vs/base/common/uuid';
-import { Range } from 'vs/editor/common/core/range';
-import { TestConfigurationService } from 'vs/platform/configuration/test/common/testConfigurationService';
-import { TestInstantiationService } from 'vs/platform/instantiation/test/common/instantiationServiceMock';
-import { NullLogService } from 'vs/platform/log/common/log';
-import { createDecorationsForStackFrame } from 'vs/workbench/contrib/debug/browser/callStackEditorContribution';
-import { getContext, getContextForContributedActions, getSpecificSourceName } from 'vs/workbench/contrib/debug/browser/callStackView';
-import { debugStackframe, debugStackframeFocused } from 'vs/workbench/contrib/debug/browser/debugIcons';
-import { getStackFrameThreadAndSessionToFocus } from 'vs/workbench/contrib/debug/browser/debugService';
-import { DebugSession } from 'vs/workbench/contrib/debug/browser/debugSession';
-import { IDebugService, IDebugSessionOptions, State } from 'vs/workbench/contrib/debug/common/debug';
-import { DebugModel, StackFrame, Thread } from 'vs/workbench/contrib/debug/common/debugModel';
-import { Source } from 'vs/workbench/contrib/debug/common/debugSource';
-import { createMockDebugModel, mockUriIdentityService } from 'vs/workbench/contrib/debug/test/browser/mockDebugModel';
-import { MockRawSession } from 'vs/workbench/contrib/debug/test/common/mockDebug';
+import { ThemeIcon } from '../../../../../base/common/themables.js';
+import { Constants } from '../../../../../base/common/uint.js';
+import { generateUuid } from '../../../../../base/common/uuid.js';
+import { upcastDeepPartial, upcastPartial } from '../../../../../base/test/common/mock.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { Range } from '../../../../../editor/common/core/range.js';
+import { TestAccessibilityService } from '../../../../../platform/accessibility/test/common/testAccessibilityService.js';
+import { TestConfigurationService } from '../../../../../platform/configuration/test/common/testConfigurationService.js';
+import { TestInstantiationService } from '../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
+import { NullLogService } from '../../../../../platform/log/common/log.js';
+import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
+import { createDecorationsForStackFrame } from '../../browser/callStackEditorContribution.js';
+import { getContext, getContextForContributedActions, getSessionContextOverlay, getSpecificSourceName, getThreadContextOverlay } from '../../browser/callStackView.js';
+import { debugStackframe, debugStackframeFocused } from '../../browser/debugIcons.js';
+import { getStackFrameThreadAndSessionToFocus } from '../../browser/debugService.js';
+import { DebugSession } from '../../browser/debugSession.js';
+import { CONTEXT_THREAD_HAS_MULTIPLE_STACK_FRAMES, IDebugService, IDebugSessionOptions, State } from '../../common/debug.js';
+import { DebugModel, StackFrame, Thread } from '../../common/debugModel.js';
+import { Source } from '../../common/debugSource.js';
+import { MockRawSession } from '../common/mockDebug.js';
+import { createMockDebugModel, mockUriIdentityService } from './mockDebugModel.js';
+import { RawDebugSession } from '../../browser/rawDebugSession.js';
 
-const mockWorkspaceContextService = {
+const mockWorkspaceContextService = upcastDeepPartial<IWorkspaceContextService>({
 	getWorkspace: () => {
 		return {
 			folders: []
 		};
 	}
-} as any;
+});
 
 export function createTestSession(model: DebugModel, name = 'mockSession', options?: IDebugSessionOptions): DebugSession {
-	return new DebugSession(generateUuid(), { resolved: { name, type: 'node', request: 'launch' }, unresolved: undefined }, undefined!, model, options, {
+	return new DebugSession(generateUuid(), { resolved: { name, type: 'node', request: 'launch' }, unresolved: undefined }, undefined, model, options, {
 		getViewModel(): any {
 			return {
 				updateViews(): void {
@@ -41,7 +45,66 @@ export function createTestSession(model: DebugModel, name = 'mockSession', optio
 				}
 			};
 		}
-	} as IDebugService, undefined!, undefined!, new TestConfigurationService({ debug: { console: { collapseIdenticalLines: true } } }), undefined!, mockWorkspaceContextService, undefined!, undefined!, undefined!, mockUriIdentityService, new TestInstantiationService(), undefined!, undefined!, new NullLogService());
+	} as IDebugService, undefined!, undefined!, new TestConfigurationService({ debug: { console: { collapseIdenticalLines: true } } }), undefined!, mockWorkspaceContextService, undefined!, undefined!, undefined!, mockUriIdentityService, new TestInstantiationService(), undefined!, undefined!, new NullLogService(), undefined!, undefined!, new TestAccessibilityService());
+}
+
+function createSingleStackFrame(session: DebugSession): StackFrame {
+	const stackFrames: StackFrame[] = [];
+	const thread = new class extends Thread {
+		public override getCallStack(): StackFrame[] {
+			return stackFrames;
+		}
+	}(session, 'mockthread', 1);
+
+	const source = new Source({
+		name: 'internalModule.js',
+		path: 'a/b/c/d/internalModule.js',
+		sourceReference: 10,
+	}, 'aDebugSessionId', mockUriIdentityService, new NullLogService());
+	const stackFrame = new StackFrame(thread, 0, source, 'app.js', 'normal', { startLineNumber: 1, startColumn: 2, endLineNumber: 1, endColumn: 10 }, 0, true);
+	stackFrames.push(stackFrame);
+	// The adapter confirms this is the only frame in the stack.
+	thread.stoppedDetails = { totalFrames: 1 };
+	return stackFrame;
+}
+
+function createPartiallyLoadedMultipleFrameStack(session: DebugSession): Thread {
+	const stackFrames: StackFrame[] = [];
+	const thread = new class extends Thread {
+		public override getCallStack(): StackFrame[] {
+			return stackFrames;
+		}
+	}(session, 'mockthread', 1);
+
+	const source = new Source({
+		name: 'internalModule.js',
+		path: 'z/x/c/d/internalModule.js',
+		sourceReference: 11,
+	}, 'aDebugSessionId', mockUriIdentityService, new NullLogService());
+	const loadedFrame = new StackFrame(thread, 0, source, 'app2.js', 'normal', { startLineNumber: 1, startColumn: 2, endLineNumber: 1, endColumn: 10 }, 0, true);
+	stackFrames.push(loadedFrame);
+	// The adapter reports two frames, but only the top frame has been loaded so far.
+	thread.stoppedDetails = { totalFrames: 2 };
+	return thread;
+}
+
+function createPartiallyLoadedStackWithUnknownDepth(session: DebugSession): Thread {
+	const stackFrames: StackFrame[] = [];
+	const thread = new class extends Thread {
+		public override getCallStack(): StackFrame[] {
+			return stackFrames;
+		}
+	}(session, 'mockthread', 1);
+
+	const source = new Source({
+		name: 'internalModule.js',
+		path: 'z/x/c/d/internalModule.js',
+		sourceReference: 11,
+	}, 'aDebugSessionId', mockUriIdentityService, new NullLogService());
+	const loadedFrame = new StackFrame(thread, 0, source, 'app2.js', 'normal', { startLineNumber: 1, startColumn: 2, endLineNumber: 1, endColumn: 10 }, 0, true);
+	stackFrames.push(loadedFrame);
+	// The adapter does not provide totalFrames, so the stack depth is still unknown.
+	return thread;
 }
 
 function createTwoStackFrames(session: DebugSession): { firstStackFrame: StackFrame; secondStackFrame: StackFrame } {
@@ -71,16 +134,14 @@ function createTwoStackFrames(session: DebugSession): { firstStackFrame: StackFr
 suite('Debug - CallStack', () => {
 	let model: DebugModel;
 	let mockRawSession: MockRawSession;
-	let disposables: DisposableStore;
+	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 
 	setup(() => {
-		disposables = new DisposableStore();
 		model = createMockDebugModel(disposables);
 		mockRawSession = new MockRawSession();
 	});
 
 	teardown(() => {
-		disposables.dispose();
 		sinon.restore();
 	});
 
@@ -121,7 +182,7 @@ suite('Debug - CallStack', () => {
 		disposables.add(session);
 		model.addSession(session);
 
-		session['raw'] = <any>mockRawSession;
+		session.raw = upcastPartial<RawDebugSession>(mockRawSession);
 
 		model.rawUpdate({
 			sessionId: session.getId(),
@@ -202,7 +263,7 @@ suite('Debug - CallStack', () => {
 		disposables.add(session);
 		model.addSession(session);
 
-		session['raw'] = <any>mockRawSession;
+		session.raw = upcastPartial<RawDebugSession>(mockRawSession);
 
 		// Stopped event with all threads stopped
 		model.rawUpdate({
@@ -256,7 +317,7 @@ suite('Debug - CallStack', () => {
 		disposables.add(session);
 		model.addSession(session);
 
-		session['raw'] = <any>mockRawSession;
+		session.raw = upcastPartial<RawDebugSession>(mockRawSession);
 
 		// Add the threads
 		model.rawUpdate({
@@ -374,6 +435,33 @@ suite('Debug - CallStack', () => {
 		assert.strictEqual(sessions[5].getId(), thirdSession.getId());
 	});
 
+	test('replacing an inactive root session removes its child sessions', async () => {
+		const oldRoot = createTestSession(model);
+		model.addSession(oldRoot);
+		const oldChild = createTestSession(model, 'oldChild', { parentSession: oldRoot });
+		model.addSession(oldChild);
+		await oldChild.terminate();
+		await oldRoot.terminate();
+
+		const replacement = disposables.add(createTestSession(model));
+		model.addSession(replacement);
+
+		assert.deepStrictEqual(model.getSessions(true).map(session => session.getId()), [replacement.getId()]);
+	});
+
+	test('adding a concurrent root session preserves inactive children of an active root session', async () => {
+		const activeRoot = disposables.add(createTestSession(model));
+		model.addSession(activeRoot);
+		const inactiveChild = disposables.add(createTestSession(model, 'inactiveChild', { parentSession: activeRoot }));
+		model.addSession(inactiveChild);
+		await inactiveChild.terminate();
+
+		const concurrentRoot = disposables.add(createTestSession(model));
+		model.addSession(concurrentRoot);
+
+		assert.deepStrictEqual(model.getSessions(true).map(session => session.getId()), [activeRoot.getId(), inactiveChild.getId(), concurrentRoot.getId()]);
+	});
+
 	test('decorations', () => {
 		const session = createTestSession(model);
 		disposables.add(session);
@@ -413,19 +501,19 @@ suite('Debug - CallStack', () => {
 		model.addSession(session);
 		const { firstStackFrame, secondStackFrame } = createTwoStackFrames(session);
 		let context = getContext(firstStackFrame);
-		assert.strictEqual(context.sessionId, firstStackFrame.thread.session.getId());
-		assert.strictEqual(context.threadId, firstStackFrame.thread.getId());
-		assert.strictEqual(context.frameId, firstStackFrame.getId());
+		assert.strictEqual(context?.sessionId, firstStackFrame.thread.session.getId());
+		assert.strictEqual(context?.threadId, firstStackFrame.thread.getId());
+		assert.strictEqual(context?.frameId, firstStackFrame.getId());
 
 		context = getContext(secondStackFrame.thread);
-		assert.strictEqual(context.sessionId, secondStackFrame.thread.session.getId());
-		assert.strictEqual(context.threadId, secondStackFrame.thread.getId());
-		assert.strictEqual(context.frameId, undefined);
+		assert.strictEqual(context?.sessionId, secondStackFrame.thread.session.getId());
+		assert.strictEqual(context?.threadId, secondStackFrame.thread.getId());
+		assert.strictEqual(context?.frameId, undefined);
 
 		context = getContext(session);
-		assert.strictEqual(context.sessionId, session.getId());
-		assert.strictEqual(context.threadId, undefined);
-		assert.strictEqual(context.frameId, undefined);
+		assert.strictEqual(context?.sessionId, session.getId());
+		assert.strictEqual(context?.threadId, undefined);
+		assert.strictEqual(context?.frameId, undefined);
 
 		let contributedContext = getContextForContributedActions(firstStackFrame);
 		assert.strictEqual(contributedContext, firstStackFrame.source.raw.path);
@@ -433,6 +521,42 @@ suite('Debug - CallStack', () => {
 		assert.strictEqual(contributedContext, firstStackFrame.thread.threadId);
 		contributedContext = getContextForContributedActions(session);
 		assert.strictEqual(contributedContext, session.getId());
+	});
+
+	test('item-level stack depth contexts', () => {
+		const session = createTestSession(model);
+		disposables.add(session);
+		model.addSession(session);
+
+		const singleFrame = createSingleStackFrame(session);
+		const partiallyLoadedMultipleFrameStack = createPartiallyLoadedMultipleFrameStack(session);
+
+		const key = CONTEXT_THREAD_HAS_MULTIPLE_STACK_FRAMES.key;
+		const stackDepth = (overlay: ReturnType<typeof getThreadContextOverlay>) => overlay.find(([contextKey]) => contextKey === key)?.[1];
+
+		assert.strictEqual(stackDepth(getThreadContextOverlay(singleFrame.thread)), false);
+		assert.strictEqual(stackDepth(getThreadContextOverlay(partiallyLoadedMultipleFrameStack)), true);
+
+		const partiallyLoadedUnknownDepthStack = createPartiallyLoadedStackWithUnknownDepth(session);
+		assert.strictEqual(stackDepth(getThreadContextOverlay(partiallyLoadedUnknownDepthStack)), true);
+
+		partiallyLoadedUnknownDepthStack.reachedEndOfCallStack = true;
+		assert.strictEqual(stackDepth(getThreadContextOverlay(partiallyLoadedUnknownDepthStack)), false);
+
+		model.rawUpdate({
+			sessionId: session.getId(),
+			threads: [{
+				id: 1,
+				name: 'partiallyLoadedThread'
+			}],
+			stoppedDetails: {
+				reason: 'breakpoint',
+				threadId: 1,
+				totalFrames: 2,
+				allThreadsStopped: true
+			}
+		});
+		assert.strictEqual(stackDepth(getSessionContextOverlay(session)), true);
 	});
 
 	test('focusStackFrameThreadAndSession', () => {
@@ -447,7 +571,7 @@ suite('Debug - CallStack', () => {
 			override get state(): State {
 				return State.Stopped;
 			}
-		}(generateUuid(), { resolved: { name: 'stoppedSession', type: 'node', request: 'launch' }, unresolved: undefined }, undefined!, model, undefined, undefined!, undefined!, undefined!, undefined!, undefined!, mockWorkspaceContextService, undefined!, undefined!, undefined!, mockUriIdentityService, new TestInstantiationService(), undefined!, undefined!, new NullLogService());
+		}(generateUuid(), { resolved: { name: 'stoppedSession', type: 'node', request: 'launch' }, unresolved: undefined }, undefined, model, undefined, undefined!, undefined!, undefined!, undefined!, undefined!, mockWorkspaceContextService, undefined!, undefined!, undefined!, mockUriIdentityService, new TestInstantiationService(), undefined!, undefined!, new NullLogService(), undefined!, undefined!, new TestAccessibilityService());
 		disposables.add(session);
 
 		const runningSession = createTestSession(model);
@@ -455,7 +579,7 @@ suite('Debug - CallStack', () => {
 		model.addSession(runningSession);
 		model.addSession(session);
 
-		session['raw'] = <any>mockRawSession;
+		session.raw = upcastPartial<RawDebugSession>(mockRawSession);
 
 		model.rawUpdate({
 			sessionId: session.getId(),

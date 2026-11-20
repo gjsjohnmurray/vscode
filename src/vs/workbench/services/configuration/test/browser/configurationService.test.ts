@@ -3,55 +3,1067 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
+import assert from 'assert';
 import * as sinon from 'sinon';
-import { URI } from 'vs/base/common/uri';
-import { Registry } from 'vs/platform/registry/common/platform';
-import { IEnvironmentService } from 'vs/platform/environment/common/environment';
-import { IConfigurationRegistry, Extensions as ConfigurationExtensions, ConfigurationScope, keyFromOverrideIdentifiers } from 'vs/platform/configuration/common/configurationRegistry';
-import { WorkspaceService } from 'vs/workbench/services/configuration/browser/configurationService';
-import { ConfigurationEditingErrorCode } from 'vs/workbench/services/configuration/common/configurationEditing';
-import { IFileService } from 'vs/platform/files/common/files';
-import { IWorkspaceContextService, WorkbenchState, IWorkspaceFoldersChangeEvent, ISingleFolderWorkspaceIdentifier, IWorkspaceIdentifier } from 'vs/platform/workspace/common/workspace';
-import { ConfigurationTarget, IConfigurationService, IConfigurationChangeEvent } from 'vs/platform/configuration/common/configuration';
-import { workbenchInstantiationService, RemoteFileSystemProvider, TestEnvironmentService, TestTextFileService } from 'vs/workbench/test/browser/workbenchTestServices';
-import { TestInstantiationService } from 'vs/platform/instantiation/test/common/instantiationServiceMock';
-import { ITextFileService } from 'vs/workbench/services/textfile/common/textfiles';
-import { ITextModelService } from 'vs/editor/common/services/resolverService';
-import { TextModelResolverService } from 'vs/workbench/services/textmodelResolver/common/textModelResolverService';
-import { IJSONEditingService } from 'vs/workbench/services/configuration/common/jsonEditing';
-import { JSONEditingService } from 'vs/workbench/services/configuration/common/jsonEditingService';
-import { Schemas } from 'vs/base/common/network';
-import { joinPath, dirname, basename } from 'vs/base/common/resources';
-import { isLinux, isMacintosh } from 'vs/base/common/platform';
-import { IRemoteAgentService } from 'vs/workbench/services/remote/common/remoteAgentService';
-import { FileService } from 'vs/platform/files/common/fileService';
-import { NullLogService } from 'vs/platform/log/common/log';
-import { IRemoteAgentEnvironment } from 'vs/platform/remote/common/remoteAgentEnvironment';
-import { APPLY_ALL_PROFILES_SETTING, IConfigurationCache } from 'vs/workbench/services/configuration/common/configuration';
-import { SignService } from 'vs/platform/sign/browser/signService';
-import { FileUserDataProvider } from 'vs/platform/userData/common/fileUserDataProvider';
-import { IKeybindingEditingService, KeybindingsEditingService } from 'vs/workbench/services/keybinding/common/keybindingEditing';
-import { IWorkbenchEnvironmentService } from 'vs/workbench/services/environment/common/environmentService';
-import { timeout } from 'vs/base/common/async';
-import { VSBuffer } from 'vs/base/common/buffer';
-import { Event } from 'vs/base/common/event';
-import { UriIdentityService } from 'vs/platform/uriIdentity/common/uriIdentityService';
-import { InMemoryFileSystemProvider } from 'vs/platform/files/common/inMemoryFilesystemProvider';
-import { BrowserWorkbenchEnvironmentService, IBrowserWorkbenchEnvironmentService } from 'vs/workbench/services/environment/browser/environmentService';
-import { RemoteAgentService } from 'vs/workbench/services/remote/browser/remoteAgentService';
-import { RemoteAuthorityResolverService } from 'vs/platform/remote/browser/remoteAuthorityResolverService';
-import { hash } from 'vs/base/common/hash';
-import { TestProductService } from 'vs/workbench/test/common/workbenchTestServices';
-import { IUserDataProfilesService, toUserDataProfile, UserDataProfilesService } from 'vs/platform/userDataProfile/common/userDataProfile';
-import { NullPolicyService } from 'vs/platform/policy/common/policy';
-import { FilePolicyService } from 'vs/platform/policy/common/filePolicyService';
-import { runWithFakedTimers } from 'vs/base/test/common/timeTravelScheduler';
-import { UserDataProfileService } from 'vs/workbench/services/userDataProfile/common/userDataProfileService';
-import { IUserDataProfileService } from 'vs/workbench/services/userDataProfile/common/userDataProfile';
-import { TasksSchemaProperties } from 'vs/workbench/contrib/tasks/common/tasks';
-import { RemoteSocketFactoryService } from 'vs/platform/remote/common/remoteSocketFactoryService';
-import { ensureNoDisposablesAreLeakedInTestSuite } from 'vs/base/test/common/utils';
+import { URI } from '../../../../../base/common/uri.js';
+import { Registry } from '../../../../../platform/registry/common/platform.js';
+import { IEnvironmentService } from '../../../../../platform/environment/common/environment.js';
+import { allSettings, IConfigurationDefaults, IConfigurationNode, IConfigurationRegistry, Extensions as ConfigurationExtensions, ConfigurationScope, keyFromOverrideIdentifiers } from '../../../../../platform/configuration/common/configurationRegistry.js';
+import { ConfigurationService } from '../../../../../platform/configuration/common/configurationService.js';
+import { getGlobalConfigurationValue } from '../../../../../platform/agentHost/common/agentHostConfigurationSync.js';
+import { ConfigurationDefaultOverridesContribution, WorkspaceService } from '../../browser/configurationService.js';
+import { ConfigurationEditingErrorCode } from '../../common/configurationEditing.js';
+import { IFileService } from '../../../../../platform/files/common/files.js';
+import { IWorkspaceContextService, WorkbenchState, IWorkspaceFoldersChangeEvent, ISingleFolderWorkspaceIdentifier, IWorkspaceIdentifier } from '../../../../../platform/workspace/common/workspace.js';
+import { ConfigurationTarget, IConfigurationService, IConfigurationChangeEvent } from '../../../../../platform/configuration/common/configuration.js';
+import { workbenchInstantiationService, RemoteFileSystemProvider, TestEnvironmentService, TestTextFileService } from '../../../../test/browser/workbenchTestServices.js';
+import { TestInstantiationService } from '../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
+import { ITextFileService } from '../../../textfile/common/textfiles.js';
+import { ITextModelService } from '../../../../../editor/common/services/resolverService.js';
+import { TextModelResolverService } from '../../../textmodelResolver/common/textModelResolverService.js';
+import { IJSONEditingService } from '../../common/jsonEditing.js';
+import { JSONEditingService } from '../../common/jsonEditingService.js';
+import { Schemas } from '../../../../../base/common/network.js';
+import { joinPath, dirname, basename } from '../../../../../base/common/resources.js';
+import { isLinux, isMacintosh } from '../../../../../base/common/platform.js';
+import { IRemoteAgentService } from '../../../remote/common/remoteAgentService.js';
+import { FileService } from '../../../../../platform/files/common/fileService.js';
+import { NullLogService } from '../../../../../platform/log/common/log.js';
+import { IRemoteAgentEnvironment } from '../../../../../platform/remote/common/remoteAgentEnvironment.js';
+import { APPLY_ALL_PROFILES_SETTING, IConfigurationCache } from '../../common/configuration.js';
+import { SignService } from '../../../../../platform/sign/browser/signService.js';
+import { FileUserDataProvider } from '../../../../../platform/userData/common/fileUserDataProvider.js';
+import { IKeybindingEditingService, KeybindingsEditingService } from '../../../keybinding/common/keybindingEditing.js';
+import { IWorkbenchEnvironmentService } from '../../../environment/common/environmentService.js';
+import { DeferredPromise, timeout } from '../../../../../base/common/async.js';
+import { VSBuffer } from '../../../../../base/common/buffer.js';
+import { Emitter, Event } from '../../../../../base/common/event.js';
+import { ITreatmentWithAssignment, IWorkbenchAssignmentService } from '../../../assignment/common/assignmentService.js';
+import { IExtensionService } from '../../../extensions/common/extensions.js';
+import { UriIdentityService } from '../../../../../platform/uriIdentity/common/uriIdentityService.js';
+import { InMemoryFileSystemProvider } from '../../../../../platform/files/common/inMemoryFilesystemProvider.js';
+import { BrowserWorkbenchEnvironmentService, IBrowserWorkbenchEnvironmentService } from '../../../environment/browser/environmentService.js';
+import { RemoteAgentService } from '../../../remote/browser/remoteAgentService.js';
+import { RemoteAuthorityResolverService } from '../../../../../platform/remote/browser/remoteAuthorityResolverService.js';
+import { hash } from '../../../../../base/common/hash.js';
+import { TestProductService } from '../../../../test/common/workbenchTestServices.js';
+import { IUserDataProfilesService, toUserDataProfile, UserDataProfilesService } from '../../../../../platform/userDataProfile/common/userDataProfile.js';
+import { NullPolicyService } from '../../../../../platform/policy/common/policy.js';
+import { FilePolicyService } from '../../../../../platform/policy/common/filePolicyService.js';
+import { runWithFakedTimers } from '../../../../../base/test/common/timeTravelScheduler.js';
+import { UserDataProfileService } from '../../../userDataProfile/common/userDataProfileService.js';
+import { IUserDataProfileService } from '../../../userDataProfile/common/userDataProfile.js';
+import { TasksSchemaProperties } from '../../../../contrib/tasks/common/tasks.js';
+import { RemoteSocketFactoryService } from '../../../../../platform/remote/common/remoteSocketFactoryService.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { upcastPartial } from '../../../../../base/test/common/mock.js';
+import { PolicyCategory } from '../../../../../base/common/policy.js';
+import { ExperimentalSettingsService } from '../../common/experimentalSettings.js';
+import { DisposableStore, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { CancellationError, errorHandler, setUnexpectedErrorHandler } from '../../../../../base/common/errors.js';
+
+suite('ConfigurationDefaultOverridesContribution', () => {
+
+	const store = ensureNoDisposablesAreLeakedInTestSuite();
+
+	const configurationRegistry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration);
+
+	type TestContribution = {
+		_store: DisposableStore;
+		processedExperimentalSettings: Set<string>;
+		autoExperimentalSettings: Set<string>;
+		pendingStartupExperimentalSettings: Set<string>;
+		keyedExperimentalSettings: Map<string, unknown>;
+		registeredExperimentalDefaults: Map<string, IConfigurationDefaults>;
+		assignmentRequests: Map<string, object>;
+		experimentalSettingsService: ExperimentalSettingsService;
+		logService: NullLogService;
+		configurationRegistry: IConfigurationRegistry;
+		workbenchAssignmentService: {
+			getTreatmentWithAssignment<T extends string | number | boolean>(name: string): Promise<ITreatmentWithAssignment<T>>;
+		};
+		environmentService: { isSessionsWindow: boolean };
+		processExperimentalSettings(properties: Iterable<string>, autoRefetch: boolean): Promise<void>;
+	};
+
+	// Builds the contribution without running its constructor so that `processExperimentalSettings`
+	// can be driven directly, resolving treatments from the given (mutable) record.
+	function createTestContribution(treatments: Record<string, unknown>): TestContribution {
+		const contribution = Object.create(ConfigurationDefaultOverridesContribution.prototype) as TestContribution;
+		contribution._store = store.add(new DisposableStore());
+		contribution.processedExperimentalSettings = new Set();
+		contribution.autoExperimentalSettings = new Set();
+		contribution.pendingStartupExperimentalSettings = new Set();
+		contribution.keyedExperimentalSettings = new Map();
+		contribution.registeredExperimentalDefaults = new Map();
+		contribution.assignmentRequests = new Map();
+		contribution.experimentalSettingsService = store.add(new ExperimentalSettingsService());
+		contribution.logService = new NullLogService();
+		contribution.configurationRegistry = configurationRegistry;
+		contribution.workbenchAssignmentService = {
+			getTreatmentWithAssignment: async <T extends string | number | boolean>(name: string) => ({
+				value: treatments[name] as T | undefined,
+				hasAssignment: Promise.resolve(treatments[name] !== undefined),
+			}),
+		};
+		contribution.environmentService = { isSessionsWindow: false };
+		return contribution;
+	}
+
+	const firstSetting = 'test.firstAutoExperimentalSetting';
+	const secondSetting = 'test.secondAutoExperimentalSetting';
+	const configuration: IConfigurationNode = {
+		id: 'test.autoExperimentalSettings',
+		type: 'object',
+		properties: {
+			[firstSetting]: {
+				type: 'string',
+				default: 'control',
+				experiment: {
+					mode: 'auto',
+					name: 'testFirstAutoExperimentalSetting'
+				}
+			},
+			[secondSetting]: {
+				type: 'string',
+				default: 'control',
+				experiment: {
+					mode: 'auto',
+					name: 'testSecondAutoExperimentalSetting'
+				}
+			}
+		}
+	};
+
+	const arraySetting = 'test.arrayExperimentalSetting';
+	const arrayConfiguration: IConfigurationNode = {
+		properties: {
+			[arraySetting]: {
+				type: 'array',
+				items: { type: 'string' },
+				default: [],
+				scope: ConfigurationScope.APPLICATION,
+				experiment: { mode: 'auto' },
+			}
+		}
+	};
+
+	test('decodes and refetches array experiment defaults while preserving explicit empty user settings', async () => {
+		const treatments: Record<string, unknown> = {};
+		const contribution = createTestContribution(treatments);
+		configurationRegistry.registerConfiguration(arrayConfiguration);
+		store.add(toDisposable(() => {
+			configurationRegistry.deregisterDefaultConfigurations([...contribution.registeredExperimentalDefaults.values()]);
+			configurationRegistry.deregisterConfigurations([arrayConfiguration]);
+		}));
+		const fileService = store.add(new FileService(contribution.logService));
+		store.add(fileService.registerProvider('test-experiments', store.add(new InMemoryFileSystemProvider())));
+		const settingsResource = URI.from({ scheme: 'test-experiments', path: '/settings.json' });
+		await fileService.writeFile(settingsResource, VSBuffer.fromString(JSON.stringify({ [arraySetting]: [] })));
+		const configurationService = store.add(new ConfigurationService(settingsResource, fileService, new NullPolicyService(), contribution.logService));
+		await configurationService.initialize();
+
+		const cases = [
+			{ treatment: undefined, defaultValue: [], assigned: false, overrides: 0 },
+			{ treatment: '[]', defaultValue: [], assigned: true, overrides: 0 },
+			{ treatment: '["owner/first"]', defaultValue: ['owner/first'], assigned: true, overrides: 1 },
+			{ treatment: '["owner/first"]', defaultValue: ['owner/first'], assigned: true, overrides: 1 },
+			{ treatment: '["team/second"]', defaultValue: ['team/second'], assigned: true, overrides: 1 },
+			{ treatment: undefined, defaultValue: [], assigned: false, overrides: 0 },
+			{ treatment: ['owner/native'], defaultValue: ['owner/native'], assigned: true, overrides: 1 },
+			{ treatment: '[]', defaultValue: [], assigned: true, overrides: 1 },
+		];
+		const results = [];
+		for (const { treatment } of cases) {
+			treatments[`config.${arraySetting}`] = treatment;
+			await contribution.processExperimentalSettings([arraySetting], results.length > 0);
+			const { defaultValue, userValue, value } = configurationService.inspect<string[]>(arraySetting);
+			results.push({
+				defaultValue, userValue, value,
+				assigned: contribution.experimentalSettingsService.hasAssignment(arraySetting),
+				overrides: contribution.registeredExperimentalDefaults.size,
+			});
+		}
+		assert.deepStrictEqual(results, cases.map(({ defaultValue, assigned, overrides }) => ({
+			defaultValue, userValue: [], value: [], assigned, overrides,
+		})));
+	});
+
+	test('logs invalid array treatments and removes stale defaults without discarding assignment metadata', async () => {
+		const treatments: Record<string, unknown> = {};
+		const contribution = createTestContribution(treatments);
+		const errors: unknown[][] = [];
+		contribution.logService = new class extends NullLogService {
+			override error(...args: unknown[]): void { errors.push(args); }
+		}();
+		configurationRegistry.registerConfiguration(arrayConfiguration);
+		store.add(toDisposable(() => {
+			configurationRegistry.deregisterDefaultConfigurations([...contribution.registeredExperimentalDefaults.values()]);
+			configurationRegistry.deregisterConfigurations([arrayConfiguration]);
+		}));
+		const invalidTreatments = ['["private/repo"', '{"repository":"private/repo"}', '"private/repo"', 'null', 'true', '1', { repository: 'private/repo' }, null, true, 1];
+		const results = [];
+		for (const treatment of invalidTreatments) {
+			treatments[`config.${arraySetting}`] = '["owner/first"]';
+			await contribution.processExperimentalSettings([arraySetting], true);
+			treatments[`config.${arraySetting}`] = treatment;
+			await contribution.processExperimentalSettings([arraySetting], true);
+			results.push({
+				default: configurationRegistry.getConfigurationProperties()[arraySetting].default,
+				source: configurationRegistry.getConfigurationProperties()[arraySetting].defaultValueSource,
+				assigned: contribution.experimentalSettingsService.hasAssignment(arraySetting),
+				overrides: contribution.registeredExperimentalDefaults.size,
+				errors: errors.splice(0),
+			});
+		}
+		assert.deepStrictEqual(results, invalidTreatments.map(() => ({
+			default: [], source: undefined, assigned: true, overrides: 0,
+			errors: [['ConfigurationService#processExperimentalSettings', arraySetting, 'Expected an array or a JSON-encoded array treatment.']],
+		})));
+	});
+
+	test('preserves scalar treatments including JSON-looking strings for non-array settings', async () => {
+		const values = [
+			['boolean', false, true],
+			['number', 0, 42],
+			['string', 'control', '["owner/repo"]'],
+			['string', 'control', '{"repository":"owner/repo"}'],
+		] as const;
+		const properties = Object.fromEntries(values.map(([type, defaultValue], index) => [`test.scalarTreatment${index}`, {
+			type, default: defaultValue, experiment: { mode: 'auto' as const },
+		}]));
+		const scalarConfiguration: IConfigurationNode = { properties };
+		const contribution = createTestContribution(Object.fromEntries(Object.keys(properties).map((key, index) => [`config.${key}`, values[index][2]])));
+		configurationRegistry.registerConfiguration(scalarConfiguration);
+		store.add(toDisposable(() => {
+			configurationRegistry.deregisterDefaultConfigurations([...contribution.registeredExperimentalDefaults.values()]);
+			configurationRegistry.deregisterConfigurations([scalarConfiguration]);
+		}));
+		await contribution.processExperimentalSettings(Object.keys(properties), false);
+		assert.deepStrictEqual(Object.keys(properties).map(key => configurationRegistry.getConfigurationProperties()[key].default), values.map(([, , treatment]) => treatment));
+	});
+
+	test('decodes array treatments and preserves values of the other types of union settings', async () => {
+		const key = 'test.unionArrayExperimentalSetting';
+		const unionConfiguration: IConfigurationNode = {
+			properties: { [key]: { type: ['boolean', 'array'], items: { type: 'string' }, default: false, experiment: { mode: 'auto' } } },
+		};
+		const treatments: Record<string, unknown> = {};
+		const contribution = createTestContribution(treatments);
+		const errors: unknown[][] = [];
+		contribution.logService = new class extends NullLogService {
+			override error(...args: unknown[]): void { errors.push(args); }
+		}();
+		configurationRegistry.registerConfiguration(unionConfiguration);
+		store.add(toDisposable(() => {
+			configurationRegistry.deregisterDefaultConfigurations([...contribution.registeredExperimentalDefaults.values()]);
+			configurationRegistry.deregisterConfigurations([unionConfiguration]);
+		}));
+		const treatmentValues = [true, '["pub.first"]', ['pub.native'], 'false', '{"id":"pub.first"}'];
+		const results = [];
+		for (const treatment of treatmentValues) {
+			treatments[`config.${key}`] = treatment;
+			await contribution.processExperimentalSettings([key], results.length > 0);
+			results.push({ default: configurationRegistry.getConfigurationProperties()[key].default, errors: errors.splice(0) });
+		}
+		assert.deepStrictEqual(results, [
+			{ default: true, errors: [] },
+			{ default: ['pub.first'], errors: [] },
+			{ default: ['pub.native'], errors: [] },
+			{ default: false, errors: [] },
+			{ default: false, errors: [['ConfigurationService#processExperimentalSettings', key, 'Expected an array or a JSON-encoded array treatment.']] },
+		]);
+	});
+
+	test('retries invalid startup array treatments until a valid value resolves, then latches it', async () => {
+		const key = 'test.startupArrayExperimentalSetting';
+		const startupConfiguration: IConfigurationNode = {
+			properties: { [key]: { type: 'array', default: [], experiment: { mode: 'startup' } } },
+		};
+		const treatments: Record<string, unknown> = {};
+		const contribution = createTestContribution(treatments);
+		configurationRegistry.registerConfiguration(startupConfiguration);
+		store.add(toDisposable(() => {
+			configurationRegistry.deregisterDefaultConfigurations([...contribution.registeredExperimentalDefaults.values()]);
+			configurationRegistry.deregisterConfigurations([startupConfiguration]);
+		}));
+		const results = [];
+		for (const treatment of [undefined, 'not JSON', '["owner/first"]', '["team/second"]', undefined]) {
+			treatments[`config.${key}`] = treatment;
+			await contribution.processExperimentalSettings([key], results.length > 0);
+			results.push({
+				default: configurationRegistry.getConfigurationProperties()[key].default,
+				pending: contribution.pendingStartupExperimentalSettings.has(key),
+				assigned: contribution.experimentalSettingsService.hasAssignment(key),
+			});
+		}
+		assert.deepStrictEqual(results, [
+			{ default: [], pending: true, assigned: false },
+			{ default: [], pending: true, assigned: true },
+			{ default: ['owner/first'], pending: false, assigned: true },
+			{ default: ['owner/first'], pending: false, assigned: true },
+			{ default: ['owner/first'], pending: false, assigned: true },
+		]);
+	});
+
+	test('applies and refetches hidden experiments through configuration change events', async () => {
+		const key = 'test.hiddenAutoExperiment';
+		const hiddenConfiguration: IConfigurationNode = {
+			properties: { [key]: { type: 'boolean', default: false, included: false, experiment: { mode: 'auto' }, agentHost: { key: 'testHiddenExperiment' } } },
+		};
+		configurationRegistry.registerConfiguration(hiddenConfiguration);
+		const logService = new NullLogService();
+		const fileService = store.add(new FileService(logService));
+		store.add(fileService.registerProvider('test-experiments', store.add(new InMemoryFileSystemProvider())));
+		const configurationService = store.add(new ConfigurationService(URI.from({ scheme: 'test-experiments', path: '/settings.json' }), fileService, new NullPolicyService(), logService));
+		await configurationService.initialize();
+		const onDidRefetchAssignments = store.add(new Emitter<void>());
+		let treatment: boolean | undefined = true;
+		const assignmentService = {
+			onDidRefetchAssignments: onDidRefetchAssignments.event,
+			getTreatmentWithAssignment: async (name: string) => ({
+				value: name === `config.${key}` ? treatment : undefined,
+				hasAssignment: Promise.resolve(name === `config.${key}` && treatment !== undefined),
+			}),
+		} as unknown as IWorkbenchAssignmentService;
+		const defaults = [configurationService.inspect<boolean>(key).defaultValue];
+		const mirrored: (boolean | undefined)[] = [];
+		store.add(configurationService.onDidChangeConfiguration(e => {
+			if (e.source === ConfigurationTarget.DEFAULT && e.affectsConfiguration(key)) {
+				mirrored.push(getGlobalConfigurationValue<boolean>(configurationService, key));
+			}
+		}));
+		const contribution = store.add(new ConfigurationDefaultOverridesContribution(
+			assignmentService,
+			{ whenInstalledExtensionsRegistered: async () => true } as unknown as IExtensionService,
+			configurationService as unknown as WorkspaceService,
+			{ isSessionsWindow: false } as unknown as IWorkbenchEnvironmentService,
+			logService,
+			store.add(new ExperimentalSettingsService()),
+		));
+		// Experiment defaults reach the configuration service through a DEFAULT change event.
+		const waitForDefault = async (value: boolean) => {
+			if (configurationService.inspect(key).defaultValue !== value) {
+				await Event.toPromise(Event.filter(configurationService.onDidChangeConfiguration, e => e.source === ConfigurationTarget.DEFAULT && configurationService.inspect(key).defaultValue === value));
+			}
+			defaults.push(configurationService.inspect<boolean>(key).defaultValue);
+		};
+		store.add(toDisposable(() => {
+			const internals = contribution as unknown as TestContribution;
+			configurationRegistry.deregisterDefaultConfigurations([...internals.registeredExperimentalDefaults.values()]);
+			configurationRegistry.deregisterConfigurations([hiddenConfiguration]);
+		}));
+		await waitForDefault(true);
+		await configurationService.updateValue(key, false);
+		const userOverride = getGlobalConfigurationValue(configurationService, key);
+		treatment = false;
+		onDidRefetchAssignments.fire();
+		await waitForDefault(false);
+		await configurationService.updateValue(key, undefined);
+		treatment = true;
+		onDidRefetchAssignments.fire();
+		await waitForDefault(true);
+		treatment = undefined;
+		onDidRefetchAssignments.fire();
+		await waitForDefault(false);
+		assert.deepStrictEqual({
+			defaults,
+			mirrored,
+			userOverride,
+			visible: !!configurationRegistry.getConfigurationProperties()[key] || !!allSettings.properties[key],
+		}, {
+			defaults: [false, true, false, true, false],
+			mirrored: [true, false, true, false],
+			userOverride: false,
+			visible: false,
+		});
+	});
+
+	test('replaces and removes auto-refetched overrides without changing other experiment defaults', async () => {
+		const treatments: Record<string, string | undefined> = {
+			testFirstAutoExperimentalSetting: 'firstTreatment',
+			testSecondAutoExperimentalSetting: 'secondTreatment',
+		};
+		const contribution = createTestContribution(treatments);
+		configurationRegistry.registerConfiguration(configuration);
+
+		store.add(toDisposable(() => {
+			if (contribution.registeredExperimentalDefaults.size) {
+				configurationRegistry.deregisterDefaultConfigurations([...contribution.registeredExperimentalDefaults.values()]);
+			}
+			configurationRegistry.deregisterConfigurations([configuration]);
+		}));
+		await contribution.processExperimentalSettings([firstSetting, secondSetting], false);
+		const initialDefaults = {
+			first: configurationRegistry.getConfigurationProperties()[firstSetting].default,
+			second: configurationRegistry.getConfigurationProperties()[secondSetting].default,
+		};
+
+		treatments.testFirstAutoExperimentalSetting = 'replacementTreatment';
+		await contribution.processExperimentalSettings([firstSetting], true);
+		const replacementDefaults = {
+			first: configurationRegistry.getConfigurationProperties()[firstSetting].default,
+			second: configurationRegistry.getConfigurationProperties()[secondSetting].default,
+		};
+
+		treatments.testFirstAutoExperimentalSetting = 'control';
+		await contribution.processExperimentalSettings([firstSetting], true);
+
+		assert.deepStrictEqual({
+			initialDefaults,
+			replacementDefaults,
+			controlDefaults: {
+				first: configurationRegistry.getConfigurationProperties()[firstSetting].default,
+				second: configurationRegistry.getConfigurationProperties()[secondSetting].default,
+			},
+		}, {
+			initialDefaults: {
+				first: 'firstTreatment',
+				second: 'secondTreatment',
+			},
+			replacementDefaults: {
+				first: 'replacementTreatment',
+				second: 'secondTreatment',
+			},
+			controlDefaults: {
+				first: 'control',
+				second: 'secondTreatment',
+			},
+		});
+	});
+
+	test('keeps an auto experiment override when it resolves again to the same value', async () => {
+		const treatments: Record<string, string | undefined> = {
+			testFirstAutoExperimentalSetting: 'treatment',
+			testSecondAutoExperimentalSetting: undefined,
+		};
+		const contribution = createTestContribution(treatments);
+		configurationRegistry.registerConfiguration(configuration);
+
+		const readDefault = () => configurationRegistry.getConfigurationProperties()[firstSetting].default;
+
+		store.add(toDisposable(() => {
+			if (contribution.registeredExperimentalDefaults.size) {
+				configurationRegistry.deregisterDefaultConfigurations([...contribution.registeredExperimentalDefaults.values()]);
+			}
+			configurationRegistry.deregisterConfigurations([configuration]);
+		}));
+		await contribution.processExperimentalSettings([firstSetting], false);
+		const afterInitial = readDefault();
+
+		// A refetch that resolves to the same value must not drop the override.
+		await contribution.processExperimentalSettings([firstSetting], true);
+		const afterRefetch = readDefault();
+
+		// Leaving the experiment removes the override again.
+		treatments.testFirstAutoExperimentalSetting = undefined;
+		await contribution.processExperimentalSettings([firstSetting], true);
+
+		assert.deepStrictEqual({ afterInitial, afterRefetch, afterLeavingExperiment: readDefault() }, {
+			afterInitial: 'treatment',
+			afterRefetch: 'treatment',
+			afterLeavingExperiment: 'control',
+		});
+	});
+
+	test('tracks default-equal assignments independently of default overrides', async () => {
+		const treatments: Record<string, string | undefined> = { testFirstAutoExperimentalSetting: 'control' };
+		const contribution = createTestContribution(treatments);
+		const changes: boolean[] = [];
+		store.add(contribution.experimentalSettingsService.onDidChangeAssignments(() => {
+			changes.push(contribution.experimentalSettingsService.hasAssignment(firstSetting));
+		}));
+		configurationRegistry.registerConfiguration(configuration);
+
+		store.add(toDisposable(() => configurationRegistry.deregisterConfigurations([configuration])));
+		await contribution.processExperimentalSettings([firstSetting], false);
+		const initial = {
+			assigned: contribution.experimentalSettingsService.hasAssignment(firstSetting),
+			source: configurationRegistry.getConfigurationProperties()[firstSetting].defaultValueSource,
+			overrides: contribution.registeredExperimentalDefaults.size,
+		};
+		await timeout(0);
+		await contribution.processExperimentalSettings([firstSetting], true);
+		treatments.testFirstAutoExperimentalSetting = undefined;
+		await contribution.processExperimentalSettings([firstSetting], true);
+		await timeout(0);
+
+		assert.deepStrictEqual({
+			initial,
+			changes,
+			default: configurationRegistry.getConfigurationProperties()[firstSetting].default,
+			source: configurationRegistry.getConfigurationProperties()[firstSetting].defaultValueSource,
+			overrides: contribution.registeredExperimentalDefaults.size,
+		}, { initial: { assigned: true, source: undefined, overrides: 0 }, changes: [true, false], default: 'control', source: undefined, overrides: 0 });
+	});
+
+	test('recognizes falsy default-equal assignments using the default treatment names', async () => {
+		const values = [['boolean', false], ['number', 0], ['string', '']] as const;
+		const properties = Object.fromEntries(values.map(([type, value], index) => [`test.falsyAssignment${index}`, {
+			type,
+			default: value,
+			experiment: { mode: 'auto' as const },
+		}]));
+		const falsyConfiguration: IConfigurationNode = { id: 'test.falsyAssignments', properties };
+		const contribution = createTestContribution(Object.fromEntries(Object.keys(properties).map((key, index) => [`config.${key}`, values[index][1]])));
+		configurationRegistry.registerConfiguration(falsyConfiguration);
+		store.add(toDisposable(() => configurationRegistry.deregisterConfigurations([falsyConfiguration])));
+		await contribution.processExperimentalSettings(Object.keys(properties), false);
+		assert.deepStrictEqual({
+			assigned: Object.keys(properties).map(key => contribution.experimentalSettingsService.hasAssignment(key)),
+			overrides: contribution.registeredExperimentalDefaults.size,
+		}, { assigned: [true, true, true], overrides: 0 });
+	});
+
+	test('applies developer override defaults without waiting for assignment metadata', async () => {
+		const contribution = createTestContribution({});
+		const assignment = new DeferredPromise<boolean>();
+		contribution.workbenchAssignmentService.getTreatmentWithAssignment = async <T extends string | number | boolean>() => ({
+			value: 'override' as T,
+			hasAssignment: assignment.p,
+		});
+		configurationRegistry.registerConfiguration(configuration);
+		store.add(toDisposable(() => {
+			configurationRegistry.deregisterDefaultConfigurations([...contribution.registeredExperimentalDefaults.values()]);
+			configurationRegistry.deregisterConfigurations([configuration]);
+		}));
+		const pending = contribution.processExperimentalSettings([firstSetting], false);
+		await timeout(0);
+		const beforeMetadata = {
+			value: configurationRegistry.getConfigurationProperties()[firstSetting].default,
+			source: configurationRegistry.getConfigurationProperties()[firstSetting].defaultValueSource,
+			assigned: contribution.experimentalSettingsService.hasAssignment(firstSetting),
+		};
+		await assignment.complete(false);
+		await pending;
+		assert.deepStrictEqual({
+			beforeMetadata,
+			assigned: contribution.experimentalSettingsService.hasAssignment(firstSetting),
+		}, { beforeMetadata: { value: 'override', source: 'experiments', assigned: false }, assigned: false });
+	});
+
+	test('coalesces sequentially resolved configuration assignments into one notification', async () => {
+		const keys = Array.from({ length: 40 }, (_, index) => `test.batchedAssignment${index}`);
+		const batchedConfiguration: IConfigurationNode = {
+			id: 'test.batchedAssignments',
+			properties: Object.fromEntries(keys.map(key => [key, { type: 'string' as const, default: 'control', experiment: { mode: 'auto' as const } }])),
+		};
+		const contribution = createTestContribution(Object.fromEntries(keys.map(key => [`config.${key}`, 'control'])));
+		const changes: string[][] = [];
+		store.add(contribution.experimentalSettingsService.onDidChangeAssignments(keys => changes.push([...keys])));
+		configurationRegistry.registerConfiguration(batchedConfiguration);
+		store.add(toDisposable(() => configurationRegistry.deregisterConfigurations([batchedConfiguration])));
+		await contribution.processExperimentalSettings(keys, false);
+		await timeout(0);
+		assert.deepStrictEqual(changes, [keys]);
+	});
+
+	test('retains an assignment on resolution failure and reports the error', async () => {
+		const contribution = createTestContribution({ testFirstAutoExperimentalSetting: 'control' });
+		const errors: string[] = [];
+		contribution.logService = new class extends NullLogService {
+			override error(message: string): void { errors.push(message); }
+		}();
+		configurationRegistry.registerConfiguration(configuration);
+		store.add(toDisposable(() => configurationRegistry.deregisterConfigurations([configuration])));
+		await contribution.processExperimentalSettings([firstSetting], false);
+		contribution.workbenchAssignmentService.getTreatmentWithAssignment = async () => { throw new Error('unavailable'); };
+		await contribution.processExperimentalSettings([firstSetting], true);
+		assert.deepStrictEqual({
+			assigned: contribution.experimentalSettingsService.hasAssignment(firstSetting),
+			errors,
+		}, { assigned: true, errors: ['ConfigurationService#processExperimentalSettings'] });
+	});
+
+	for (const metadataOnly of [false, true]) {
+		test(`retains assignments without logging ${metadataOnly ? 'metadata' : 'treatment'} cancellation`, async () => {
+			const contribution = createTestContribution({ testFirstAutoExperimentalSetting: 'control' });
+			const errors: string[] = [];
+			contribution.logService = new class extends NullLogService {
+				override error(message: string): void { errors.push(message); }
+			}();
+			configurationRegistry.registerConfiguration(configuration);
+			store.add(toDisposable(() => configurationRegistry.deregisterConfigurations([configuration])));
+			await contribution.processExperimentalSettings([firstSetting], false);
+			contribution.workbenchAssignmentService.getTreatmentWithAssignment = async <T extends string | number | boolean>() => {
+				if (!metadataOnly) {
+					throw new CancellationError();
+				}
+				return { value: 'control' as T, hasAssignment: Promise.reject(new CancellationError()) };
+			};
+			await contribution.processExperimentalSettings([firstSetting], true);
+			assert.deepStrictEqual({ assigned: contribution.experimentalSettingsService.hasAssignment(firstSetting), errors }, { assigned: true, errors: [] });
+		});
+	}
+
+	test('retries unresolved startup settings after assignment-client cancellation', async () => {
+		const key = 'test.cancelledStartupAssignment';
+		const startupConfiguration: IConfigurationNode = {
+			id: 'test.cancelledStartup',
+			properties: { [key]: { type: 'string', default: 'control', experiment: { mode: 'startup' } } },
+		};
+		const contribution = createTestContribution({ [`config.${key}`]: 'control' });
+		const readTreatment = contribution.workbenchAssignmentService.getTreatmentWithAssignment;
+		contribution.workbenchAssignmentService.getTreatmentWithAssignment = async () => { throw new CancellationError(); };
+		configurationRegistry.registerConfiguration(startupConfiguration);
+		store.add(toDisposable(() => configurationRegistry.deregisterConfigurations([startupConfiguration])));
+		await contribution.processExperimentalSettings([key], false);
+		const pendingAfterCancellation = contribution.pendingStartupExperimentalSettings.has(key);
+		contribution.workbenchAssignmentService.getTreatmentWithAssignment = readTreatment;
+		await contribution.processExperimentalSettings([...contribution.pendingStartupExperimentalSettings], true);
+		assert.deepStrictEqual({
+			pendingAfterCancellation,
+			assigned: contribution.experimentalSettingsService.hasAssignment(key),
+			pendingAfterResolution: contribution.pendingStartupExperimentalSettings.has(key),
+		}, { pendingAfterCancellation: true, assigned: true, pendingAfterResolution: false });
+	});
+
+	test('removes assignment state when experiment metadata is removed', async () => {
+		const contribution = createTestContribution({ testFirstAutoExperimentalSetting: 'control' });
+		configurationRegistry.registerConfiguration(configuration);
+		store.add(toDisposable(() => configurationRegistry.deregisterConfigurations([configuration])));
+		await contribution.processExperimentalSettings([firstSetting], false);
+		configurationRegistry.deregisterConfigurations([configuration]);
+		await contribution.processExperimentalSettings([firstSetting], false);
+		assert.strictEqual(contribution.experimentalSettingsService.hasAssignment(firstSetting), false);
+	});
+
+	test('ignores a pending treatment after a hidden setting is deregistered', async () => {
+		const key = 'test.removedHiddenExperiment';
+		const hiddenConfiguration: IConfigurationNode = {
+			properties: { [key]: { type: 'boolean', default: false, included: false, experiment: { mode: 'auto' } } },
+		};
+		const contribution = createTestContribution({});
+		const gate = new DeferredPromise<void>();
+		contribution.workbenchAssignmentService.getTreatmentWithAssignment = async <T extends string | number | boolean>() => {
+			await gate.p;
+			return { value: true as T, hasAssignment: Promise.resolve(true) };
+		};
+		configurationRegistry.registerConfiguration(hiddenConfiguration);
+		try {
+			const pending = contribution.processExperimentalSettings([key], false);
+			configurationRegistry.deregisterConfigurations([hiddenConfiguration]);
+			await contribution.processExperimentalSettings([key], false);
+			await gate.complete();
+			await pending;
+			assert.deepStrictEqual({
+				registeredDefault: contribution.registeredExperimentalDefaults.has(key),
+				override: configurationRegistry.getConfigurationDefaultsOverrides().get(key),
+				assigned: contribution.experimentalSettingsService.hasAssignment(key),
+			}, { registeredDefault: false, override: undefined, assigned: false });
+		} finally {
+			await gate.complete();
+			configurationRegistry.deregisterDefaultConfigurations([...contribution.registeredExperimentalDefaults.values()]);
+			configurationRegistry.deregisterConfigurations([hiddenConfiguration]);
+		}
+	});
+
+	test('ignores assignment metadata from a superseded resolution', async () => {
+		const contribution = createTestContribution({ testFirstAutoExperimentalSetting: 'control' });
+		const assignment = new DeferredPromise<boolean>();
+		contribution.workbenchAssignmentService.getTreatmentWithAssignment = async <T extends string | number | boolean>() => ({
+			value: 'control' as T,
+			hasAssignment: assignment.p,
+		});
+		configurationRegistry.registerConfiguration(configuration);
+
+		store.add(toDisposable(() => configurationRegistry.deregisterConfigurations([configuration])));
+		const first = contribution.processExperimentalSettings([firstSetting], false);
+		await timeout(0);
+		contribution.workbenchAssignmentService.getTreatmentWithAssignment = async () => ({
+			value: undefined,
+			hasAssignment: Promise.resolve(false),
+		});
+		await contribution.processExperimentalSettings([firstSetting], true);
+		await assignment.complete(true);
+		await first;
+		assert.strictEqual(contribution.experimentalSettingsService.hasAssignment(firstSetting), false);
+	});
+
+	test('applies an auto experiment value that matches the schema default over another default override', async () => {
+		const overriddenSetting = 'test.overriddenAutoExperimentalSetting';
+		const overriddenConfiguration: IConfigurationNode = {
+			id: 'test.overriddenAutoExperimentalSettings',
+			type: 'object',
+			properties: {
+				[overriddenSetting]: {
+					type: 'string',
+					default: 'control',
+					experiment: {
+						mode: 'auto',
+						name: 'testOverriddenAutoExperimentalSetting'
+					}
+				}
+			}
+		};
+		// A competing default override that has not opted out of experiment overrides.
+		const otherDefaults: IConfigurationDefaults = { overrides: { [overriddenSetting]: 'otherDefault' }, source: 'otherDefaults' };
+		const treatments: Record<string, string | undefined> = {
+			testOverriddenAutoExperimentalSetting: 'control',
+		};
+		const contribution = createTestContribution(treatments);
+		configurationRegistry.registerConfiguration(overriddenConfiguration);
+		configurationRegistry.registerDefaultConfigurations([otherDefaults]);
+
+		const readDefault = () => configurationRegistry.getConfigurationProperties()[overriddenSetting].default;
+
+		store.add(toDisposable(() => {
+			if (contribution.registeredExperimentalDefaults.size) {
+				configurationRegistry.deregisterDefaultConfigurations([...contribution.registeredExperimentalDefaults.values()]);
+			}
+			configurationRegistry.deregisterDefaultConfigurations([otherDefaults]);
+			configurationRegistry.deregisterConfigurations([overriddenConfiguration]);
+		}));
+		const beforeExperiment = readDefault();
+		await contribution.processExperimentalSettings([overriddenSetting], false);
+		const afterInitial = readDefault();
+
+		await contribution.processExperimentalSettings([overriddenSetting], true);
+
+		assert.deepStrictEqual({ beforeExperiment, afterInitial, afterRefetch: readDefault() }, {
+			beforeExperiment: 'otherDefault',
+			afterInitial: 'control',
+			afterRefetch: 'control',
+		});
+	});
+
+	test('defers a startup experiment until its value first resolves, then latches it', async () => {
+		const startupSetting = 'test.startupExperimentalSetting';
+		const startupConfiguration: IConfigurationNode = {
+			id: 'test.startupExperimentalSettings',
+			type: 'object',
+			properties: {
+				[startupSetting]: {
+					type: 'string',
+					default: 'control',
+					experiment: {
+						mode: 'startup',
+						name: 'testStartupExperimentalSetting'
+					}
+				}
+			}
+		};
+		// The treatment is unavailable during the initial resolution (as with a sign-in gated
+		// assignments endpoint) and only becomes available on a later refetch.
+		const treatments: Record<string, string | undefined> = {
+			testStartupExperimentalSetting: undefined,
+		};
+		const contribution = createTestContribution(treatments);
+		configurationRegistry.registerConfiguration(startupConfiguration);
+
+		const readDefault = () => configurationRegistry.getConfigurationProperties()[startupSetting].default;
+		// Mirror the refetch handler, which re-resolves only pending startup settings.
+		const refetch = () => contribution.processExperimentalSettings([...contribution.pendingStartupExperimentalSettings], true);
+
+		store.add(toDisposable(() => {
+			if (contribution.registeredExperimentalDefaults.size) {
+				configurationRegistry.deregisterDefaultConfigurations([...contribution.registeredExperimentalDefaults.values()]);
+			}
+			configurationRegistry.deregisterConfigurations([startupConfiguration]);
+		}));
+		// Initial resolution: no value yet, so the default is untouched and the setting is pending.
+		await contribution.processExperimentalSettings([startupSetting], false);
+		const afterInitial = { default: readDefault(), pending: contribution.pendingStartupExperimentalSettings.has(startupSetting), assigned: contribution.experimentalSettingsService.hasAssignment(startupSetting) };
+
+		// The value becomes available; the next refetch resolves and latches it.
+		treatments.testStartupExperimentalSetting = 'treatment';
+		await refetch();
+		const afterResolved = { default: readDefault(), pending: contribution.pendingStartupExperimentalSettings.has(startupSetting), assigned: contribution.experimentalSettingsService.hasAssignment(startupSetting) };
+
+		// A later assignment change must not move a latched startup value.
+		treatments.testStartupExperimentalSetting = undefined;
+		await contribution.processExperimentalSettings([startupSetting], true);
+		const afterLatched = { default: readDefault(), pending: contribution.pendingStartupExperimentalSettings.has(startupSetting), assigned: contribution.experimentalSettingsService.hasAssignment(startupSetting) };
+
+		assert.deepStrictEqual({ afterInitial, afterResolved, afterLatched }, {
+			afterInitial: { default: 'control', pending: true, assigned: false },
+			afterResolved: { default: 'treatment', pending: false, assigned: true },
+			afterLatched: { default: 'treatment', pending: false, assigned: true },
+		});
+	});
+
+	test('does not re-resolve a startup experiment that already resolved at startup', async () => {
+		const startupSetting = 'test.resolvedStartupExperimentalSetting';
+		const startupConfiguration: IConfigurationNode = {
+			id: 'test.resolvedStartupExperimentalSettings',
+			type: 'object',
+			properties: {
+				[startupSetting]: {
+					type: 'string',
+					default: 'control',
+					experiment: {
+						mode: 'startup',
+						name: 'testResolvedStartupExperimentalSetting'
+					}
+				}
+			}
+		};
+		// The value is available during the initial resolution (as with the legacy endpoint, which
+		// resolves before sign-in).
+		const treatments: Record<string, string | undefined> = {
+			testResolvedStartupExperimentalSetting: 'treatment',
+		};
+		const contribution = createTestContribution(treatments);
+		configurationRegistry.registerConfiguration(startupConfiguration);
+
+		const readDefault = () => configurationRegistry.getConfigurationProperties()[startupSetting].default;
+		store.add(toDisposable(() => {
+			if (contribution.registeredExperimentalDefaults.size) {
+				configurationRegistry.deregisterDefaultConfigurations([...contribution.registeredExperimentalDefaults.values()]);
+			}
+			configurationRegistry.deregisterConfigurations([startupConfiguration]);
+		}));
+		// Initial resolution captures the value and latches it (it is never pending).
+		await contribution.processExperimentalSettings([startupSetting], false);
+		const afterInitial = { default: readDefault(), pending: contribution.pendingStartupExperimentalSettings.has(startupSetting) };
+
+		// A later assignment change (e.g. after sign-in) must not move an already-resolved value.
+		treatments.testResolvedStartupExperimentalSetting = 'changed';
+		await contribution.processExperimentalSettings([startupSetting], true);
+		const afterRefetch = { default: readDefault(), pending: contribution.pendingStartupExperimentalSettings.has(startupSetting) };
+
+		assert.deepStrictEqual({ afterInitial, afterRefetch }, {
+			afterInitial: { default: 'treatment', pending: false },
+			afterRefetch: { default: 'treatment', pending: false },
+		});
+	});
+
+	test('re-resolves pending startup settings when onDidRefetchAssignments fires', async () => {
+		const startupSetting = 'test.wiredStartupExperimentalSetting';
+		const startupConfiguration: IConfigurationNode = {
+			id: 'test.wiredStartupExperimentalSettings',
+			type: 'object',
+			properties: {
+				[startupSetting]: {
+					type: 'string',
+					default: 'control',
+					experiment: {
+						mode: 'startup',
+						name: 'testWiredStartupExperimentalSetting'
+					}
+				}
+			}
+		};
+		// No value at startup, so the setting stays pending until a value arrives on a refetch.
+		const treatments: Record<string, string | undefined> = {
+			testWiredStartupExperimentalSetting: undefined,
+		};
+		const onDidRefetchAssignments = store.add(new Emitter<void>());
+
+		// Construct the real contribution so the constructor's `onDidRefetchAssignments` -> refetch
+		// wiring is exercised end to end (rather than calling processExperimentalSettings directly).
+		const workbenchAssignmentService = {
+			onDidRefetchAssignments: onDidRefetchAssignments.event,
+			getTreatmentWithAssignment: async (name: string) => ({
+				value: treatments[name],
+				hasAssignment: Promise.resolve(treatments[name] !== undefined),
+			}),
+		} as unknown as IWorkbenchAssignmentService;
+		const extensionService = { whenInstalledExtensionsRegistered: async () => true } as unknown as IExtensionService;
+		// The constructor's initial resolution ends by reloading the defaults.
+		const initialResolution = new DeferredPromise<void>();
+		const workspaceService = { reloadConfiguration: async () => { initialResolution.complete(); } } as unknown as WorkspaceService;
+		const environmentService = { isSessionsWindow: false } as unknown as IWorkbenchEnvironmentService;
+
+		configurationRegistry.registerConfiguration(startupConfiguration);
+		const experimentalSettingsService = store.add(new ExperimentalSettingsService());
+		const contribution = store.add(new ConfigurationDefaultOverridesContribution(workbenchAssignmentService, extensionService, workspaceService, environmentService, new NullLogService(), experimentalSettingsService));
+		const internals = contribution as unknown as {
+			pendingStartupExperimentalSettings: Set<string>;
+			registeredExperimentalDefaults: Map<string, IConfigurationDefaults>;
+		};
+		const readDefault = () => configurationRegistry.getConfigurationProperties()[startupSetting].default;
+		const isResolved = () => readDefault() === 'treatment' && experimentalSettingsService.hasAssignment(startupSetting);
+
+		store.add(toDisposable(() => {
+			if (internals.registeredExperimentalDefaults.size) {
+				configurationRegistry.deregisterDefaultConfigurations([...internals.registeredExperimentalDefaults.values()]);
+			}
+			configurationRegistry.deregisterConfigurations([startupConfiguration]);
+		}));
+		// The constructor's initial resolution finds no value, so the setting becomes pending.
+		await initialResolution.p;
+		const afterInitial = { default: readDefault(), pending: internals.pendingStartupExperimentalSettings.has(startupSetting), assigned: experimentalSettingsService.hasAssignment(startupSetting) };
+
+		// A value arrives; firing the event must re-resolve the pending setting through the wiring.
+		treatments.testWiredStartupExperimentalSetting = 'treatment';
+		onDidRefetchAssignments.fire();
+		// The assignment is published after the default override is registered.
+		if (!isResolved()) {
+			await Event.toPromise(Event.filter(experimentalSettingsService.onDidChangeAssignments, isResolved));
+		}
+
+		assert.deepStrictEqual({ afterInitial, afterRefetch: { default: readDefault(), pending: internals.pendingStartupExperimentalSettings.has(startupSetting), assigned: experimentalSettingsService.hasAssignment(startupSetting) } }, {
+			afterInitial: { default: 'control', pending: true, assigned: false },
+			afterRefetch: { default: 'treatment', pending: false, assigned: true },
+		});
+	});
+
+	const keyedSetting = 'test.keyedExperimentalSetting';
+
+	function registerKeyedConfiguration(mode: 'startup' | 'auto'): () => unknown {
+		const keyedConfiguration: IConfigurationNode = {
+			id: 'test.keyedExperimentalSettings',
+			type: 'object',
+			properties: {
+				[keyedSetting]: {
+					type: 'object',
+					additionalProperties: { type: 'boolean' },
+					default: {},
+					scope: ConfigurationScope.APPLICATION,
+					experiment: { mode, name: 'testKeyedExperimentalSetting', keyed: true },
+				}
+			}
+		};
+		configurationRegistry.registerConfiguration(keyedConfiguration);
+		store.add(toDisposable(() => {
+			configurationRegistry.deregisterDefaultConfigurations(configurationRegistry.getRegisteredDefaultConfigurations().filter(defaults => defaults.overrides[keyedSetting] !== undefined));
+			configurationRegistry.deregisterConfigurations([keyedConfiguration]);
+		}));
+		return () => configurationRegistry.getConfigurationProperties()[keyedSetting].default;
+	}
+
+	test('resolves each requested key of a keyed experiment setting from its own treatment, while user values win per key', async () => {
+		const treatments: Record<string, unknown> = {
+			'testKeyedExperimentalSetting.first': true,
+			'testKeyedExperimentalSetting.second': false,
+			'testKeyedExperimentalSetting.unrequested': true,
+		};
+		const contribution = createTestContribution(treatments);
+		const readDefault = registerKeyedConfiguration('startup');
+		const fileService = store.add(new FileService(contribution.logService));
+		store.add(fileService.registerProvider('test-experiments', store.add(new InMemoryFileSystemProvider())));
+		const settingsResource = URI.from({ scheme: 'test-experiments', path: '/settings.json' });
+		await fileService.writeFile(settingsResource, VSBuffer.fromString(JSON.stringify({ [keyedSetting]: { second: true } })));
+		const configurationService = store.add(new ConfigurationService(settingsResource, fileService, new NullPolicyService(), contribution.logService));
+		await configurationService.initialize();
+
+		contribution.experimentalSettingsService.requestKeys(keyedSetting, ['first', 'second', 'third']);
+		await contribution.processExperimentalSettings([keyedSetting], false);
+
+		assert.deepStrictEqual({
+			default: readDefault(),
+			value: configurationService.getValue(keyedSetting),
+			assigned: contribution.experimentalSettingsService.hasAssignment(keyedSetting),
+			pending: contribution.pendingStartupExperimentalSettings.has(keyedSetting),
+		}, {
+			default: { first: true, second: false },
+			value: { first: true, second: true },
+			assigned: true,
+			// `third` has no value yet.
+			pending: true,
+		});
+	});
+
+	test('latches the first value of each key of a keyed startup experiment and resolves pending keys on refetch', async () => {
+		const treatments: Record<string, unknown> = { 'testKeyedExperimentalSetting.first': true };
+		const contribution = createTestContribution(treatments);
+		const readDefault = registerKeyedConfiguration('startup');
+		const snapshot = () => ({ default: readDefault(), pending: contribution.pendingStartupExperimentalSettings.has(keyedSetting) });
+
+		contribution.experimentalSettingsService.requestKeys(keyedSetting, ['first', 'second']);
+		await contribution.processExperimentalSettings([keyedSetting], false);
+		const initial = snapshot();
+
+		treatments['testKeyedExperimentalSetting.first'] = false;
+		treatments['testKeyedExperimentalSetting.second'] = true;
+		await contribution.processExperimentalSettings([...contribution.pendingStartupExperimentalSettings], true);
+		const refetched = snapshot();
+
+		treatments['testKeyedExperimentalSetting.second'] = false;
+		await contribution.processExperimentalSettings([keyedSetting], true);
+		const latched = snapshot();
+
+		assert.deepStrictEqual({ initial, refetched, latched }, {
+			initial: { default: { first: true }, pending: true },
+			refetched: { default: { first: true, second: true }, pending: false },
+			latched: { default: { first: true, second: true }, pending: false },
+		});
+	});
+
+	test('updates each key of a keyed auto experiment on refetch and removes keys whose assignment ended', async () => {
+		const treatments: Record<string, unknown> = { 'testKeyedExperimentalSetting.first': true, 'testKeyedExperimentalSetting.second': true };
+		const contribution = createTestContribution(treatments);
+		const readDefault = registerKeyedConfiguration('auto');
+		const snapshot = () => ({ default: readDefault(), assigned: contribution.experimentalSettingsService.hasAssignment(keyedSetting), overrides: contribution.registeredExperimentalDefaults.size });
+
+		contribution.experimentalSettingsService.requestKeys(keyedSetting, ['first', 'second']);
+		await contribution.processExperimentalSettings([keyedSetting], false);
+		const initial = snapshot();
+
+		treatments['testKeyedExperimentalSetting.first'] = false;
+		treatments['testKeyedExperimentalSetting.second'] = undefined;
+		await contribution.processExperimentalSettings([...contribution.autoExperimentalSettings], true);
+		const changed = snapshot();
+
+		treatments['testKeyedExperimentalSetting.first'] = undefined;
+		await contribution.processExperimentalSettings([...contribution.autoExperimentalSettings], true);
+		const ended = snapshot();
+
+		assert.deepStrictEqual({ initial, changed, ended }, {
+			initial: { default: { first: true, second: true }, assigned: true, overrides: 1 },
+			changed: { default: { first: false }, assigned: true, overrides: 1 },
+			ended: { default: {}, assigned: false, overrides: 0 },
+		});
+	});
+
+	test('ignores an older read of a keyed auto experiment key that finishes after a newer read', async () => {
+		const contribution = createTestContribution({});
+		const readDefault = registerKeyedConfiguration('auto');
+		const olderRead = new DeferredPromise<{ value: unknown; hasAssignment: Promise<boolean> }>();
+		const reads = [olderRead.p, Promise.resolve({ value: undefined, hasAssignment: Promise.resolve(false) })];
+		let read = 0;
+		contribution.workbenchAssignmentService = {
+			getTreatmentWithAssignment: async <T extends string | number | boolean>() => {
+				const { value, hasAssignment } = await reads[read++];
+				return { value: value as T | undefined, hasAssignment };
+			},
+		};
+
+		// The first read of a key that is requested late overlaps a refetch, which ends the key's assignment.
+		contribution.experimentalSettingsService.requestKeys(keyedSetting, ['first']);
+		const lateRequest = contribution.processExperimentalSettings([keyedSetting], false);
+		await contribution.processExperimentalSettings([keyedSetting], true);
+		olderRead.complete({ value: true, hasAssignment: Promise.resolve(true) });
+		await lateRequest;
+
+		assert.deepStrictEqual({ default: readDefault(), assigned: contribution.experimentalSettingsService.hasAssignment(keyedSetting) }, {
+			default: {},
+			assigned: false,
+		});
+	});
+
+	test('resolves the keys of a keyed experiment setting when they are requested after startup', async () => {
+		const treatments: Record<string, unknown> = { 'testKeyedExperimentalSetting.first': true, 'testKeyedExperimentalSetting.second': false };
+		const readDefault = registerKeyedConfiguration('startup');
+		const experimentalSettingsService = store.add(new ExperimentalSettingsService());
+		const initialResolution = new DeferredPromise<void>();
+		store.add(new ConfigurationDefaultOverridesContribution(
+			upcastPartial<IWorkbenchAssignmentService>({
+				onDidRefetchAssignments: Event.None,
+				getTreatmentWithAssignment: async <T extends string | number | boolean>(name: string) => ({
+					value: treatments[name] as T | undefined,
+					hasAssignment: Promise.resolve(treatments[name] !== undefined),
+				}),
+			}),
+			upcastPartial<IExtensionService>({ whenInstalledExtensionsRegistered: async () => true }),
+			upcastPartial<WorkspaceService>({ reloadConfiguration: async () => { initialResolution.complete(); } }),
+			upcastPartial<IWorkbenchEnvironmentService>({ isSessionsWindow: false }),
+			new NullLogService(),
+			experimentalSettingsService,
+		));
+		await initialResolution.p;
+		const beforeRequest = readDefault();
+
+		experimentalSettingsService.requestKeys(keyedSetting, ['first', 'second']);
+		await Event.toPromise(Event.filter(experimentalSettingsService.onDidChangeAssignments, () => experimentalSettingsService.hasAssignment(keyedSetting)));
+
+		assert.deepStrictEqual({ beforeRequest, afterRequest: readDefault() }, {
+			beforeRequest: {},
+			afterRequest: { first: true, second: false },
+		});
+	});
+});
 
 function convertToWorkspacePayload(folder: URI): ISingleFolderWorkspaceIdentifier {
 	return {
@@ -73,12 +1085,13 @@ suite('WorkspaceContextService - Folder', () => {
 
 	const folderName = 'Folder A';
 	let folder: URI;
+	let folderFileService: FileService;
 	let testObject: WorkspaceService;
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 
 	setup(async () => {
 		const logService = new NullLogService();
-		const fileService = disposables.add(new FileService(logService));
+		const fileService = folderFileService = disposables.add(new FileService(logService));
 		const fileSystemProvider = disposables.add(new InMemoryFileSystemProvider());
 		disposables.add(fileService.registerProvider(ROOT.scheme, fileSystemProvider));
 
@@ -101,7 +1114,7 @@ suite('WorkspaceContextService - Folder', () => {
 				userDataProfileService,
 				environmentService,
 				TestProductService,
-				disposables.add(new RemoteAuthorityResolverService(false, undefined, undefined, TestProductService, logService)),
+				disposables.add(new RemoteAuthorityResolverService(false, undefined, undefined, undefined, TestProductService, logService)),
 				new SignService(TestProductService), new NullLogService())),
 			uriIdentityService,
 			new NullLogService(),
@@ -152,7 +1165,7 @@ suite('WorkspaceContextService - Folder', () => {
 			userDataProfileService,
 			userDataProfilesService,
 			fileService,
-			disposables.add(new RemoteAgentService(new RemoteSocketFactoryService(), userDataProfileService, environmentService, TestProductService, disposables.add(new RemoteAuthorityResolverService(false, undefined, undefined, TestProductService, logService)), new SignService(TestProductService), new NullLogService())),
+			disposables.add(new RemoteAgentService(new RemoteSocketFactoryService(), userDataProfileService, environmentService, TestProductService, disposables.add(new RemoteAuthorityResolverService(false, undefined, undefined, undefined, TestProductService, logService)), new SignService(TestProductService), new NullLogService())),
 			uriIdentityService,
 			new NullLogService(),
 			new NullPolicyService()));
@@ -184,11 +1197,11 @@ suite('WorkspaceContextService - Folder', () => {
 			userDataProfileService,
 			userDataProfilesService,
 			fileService,
-			disposables.add(new RemoteAgentService(new RemoteSocketFactoryService(), userDataProfileService, environmentService, TestProductService, disposables.add(new RemoteAuthorityResolverService(false, undefined, undefined, TestProductService, logService)), new SignService(TestProductService), new NullLogService())),
+			disposables.add(new RemoteAgentService(new RemoteSocketFactoryService(), userDataProfileService, environmentService, TestProductService, disposables.add(new RemoteAuthorityResolverService(false, undefined, undefined, undefined, TestProductService, logService)), new SignService(TestProductService), new NullLogService())),
 			uriIdentityService,
 			new NullLogService(),
 			new NullPolicyService()));
-		await (<WorkspaceService>testObject).initialize(convertToWorkspacePayload(folder));
+		await testObject.initialize(convertToWorkspacePayload(folder));
 
 		const actual = testObject.getWorkspaceFolder(joinPath(folder, 'a').with({ query: 'myquery=1' }));
 
@@ -204,6 +1217,132 @@ suite('WorkspaceContextService - Folder', () => {
 	});
 
 	test('workspace is complete', () => testObject.getCompleteWorkspace());
+
+	test('a window started at a persisted alternate location keeps the opened folder as uri', () => runWithFakedTimers({ useFakeTimers: true }, async () => {
+		const logService = new NullLogService();
+		const fileService = disposables.add(new FileService(logService));
+		const fileSystemProvider = disposables.add(new InMemoryFileSystemProvider());
+		disposables.add(fileService.registerProvider(ROOT.scheme, fileSystemProvider));
+
+		const alternate = joinPath(ROOT, 'Alternate');
+		await fileService.createFolder(folder);
+
+		const environmentService = TestEnvironmentService;
+		const uriIdentityService = disposables.add(new UriIdentityService(fileService));
+		const userDataProfilesService = disposables.add(new UserDataProfilesService(environmentService, fileService, uriIdentityService, logService));
+		disposables.add(fileService.registerProvider(Schemas.vscodeUserData, disposables.add(new FileUserDataProvider(ROOT.scheme, fileSystemProvider, Schemas.vscodeUserData, userDataProfilesService, uriIdentityService, new NullLogService()))));
+		const userDataProfileService = disposables.add(new UserDataProfileService(userDataProfilesService.defaultProfile));
+		const restored = disposables.add(new WorkspaceService(
+			{ configurationCache: new ConfigurationCache() },
+			environmentService,
+			userDataProfileService,
+			userDataProfilesService,
+			fileService,
+			disposables.add(new RemoteAgentService(new RemoteSocketFactoryService(), userDataProfileService, environmentService, TestProductService, disposables.add(new RemoteAuthorityResolverService(false, undefined, undefined, undefined, TestProductService, logService)), new SignService(TestProductService), new NullLogService())),
+			uriIdentityService,
+			new NullLogService(),
+			new NullPolicyService()));
+		await restored.initialize(convertToWorkspacePayload(folder), alternate);
+
+		const workspace = restored.getWorkspace();
+		assert.deepStrictEqual(
+			{ id: workspace.id, folder: workspace.folders[0].uri.toString(), uri: workspace.uri, isCurrent: restored.isCurrentWorkspace(folder) },
+			{ id: convertToWorkspacePayload(folder).id, folder: alternate.toString(), uri: folder, isCurrent: true });
+	}));
+
+	test('uri is the opened folder and survives a switch to an alternate location', async () => {
+		const initial = testObject.getWorkspace();
+		const opened = { uri: initial.uri, folder: initial.folders[0].uri.toString() };
+
+		const alternate = joinPath(ROOT, 'Alternate');
+		await testObject.setFolderLocation(alternate);
+		const restored = testObject.getWorkspace();
+
+		assert.deepStrictEqual(
+			{ opened, restored: { uri: restored.uri, folder: restored.folders[0].uri.toString(), isCurrent: testObject.isCurrentWorkspace(folder) } },
+			{ opened: { uri: folder, folder: folder.toString() }, restored: { uri: folder, folder: alternate.toString(), isCurrent: true } });
+	});
+
+	test('setFolderLocation() loads the destination with its own trust, never applying restricted settings of an untrusted destination', async () => {
+		const settingKey = 'configurationService.folder.restrictedSetting';
+		const alternate = joinPath(ROOT, 'Alternate');
+		await folderFileService.writeFile(joinPath(alternate, '.vscode', 'settings.json'), VSBuffer.fromString(`{ "${settingKey}": "alternateValue" }`));
+		await folderFileService.writeFile(joinPath(folder, '.vscode', 'settings.json'), VSBuffer.fromString(`{ "${settingKey}": "primaryValue" }`));
+		await testObject.reloadConfiguration();
+		testObject.updateWorkspaceTrust(true);
+
+		const published: unknown[] = [];
+		disposables.add(testObject.onDidChangeConfiguration(() => published.push(testObject.getValue(settingKey, { resource: testObject.getWorkspace().folders[0].uri }))));
+		let unflagged = 0;
+		disposables.add(testObject.onWillChangeWorkspaceFolders(e => { if (!e.isFolderLocationChange) { unflagged++; } }));
+
+		await testObject.setFolderLocation(alternate, { trusted: false });
+		const untrusted = testObject.getValue(settingKey, { resource: alternate });
+		await testObject.setFolderLocation(folder, { trusted: true });
+		await testObject.setFolderLocation(alternate, { trusted: true });
+		const trusted = testObject.getValue(settingKey, { resource: alternate });
+
+		assert.deepStrictEqual({ untrusted, trusted, published, unflagged }, { untrusted: undefined, trusted: 'alternateValue', published: [undefined, 'primaryValue', 'alternateValue'], unflagged: 0 });
+	});
+
+	test('setFolderLocation() skips a queued switch that became stale while an earlier edit was running', async () => {
+		const first = joinPath(ROOT, 'Alternate');
+		const second = joinPath(ROOT, 'Alternate2');
+		const hold = new DeferredPromise<void>();
+		let held = false;
+		disposables.add(testObject.onWillChangeWorkspaceFolders(e => { if (!held) { held = true; e.join(hold.p); } }));
+		const folders: string[] = [];
+		disposables.add(testObject.onDidChangeWorkspaceFolders(() => folders.push(testObject.getWorkspace().folders[0].uri.toString())));
+
+		let stale = false;
+		const holder = testObject.setFolderLocation(first);
+		const queued = testObject.setFolderLocation(second, { isCurrent: () => !stale });
+		stale = true;
+		hold.complete();
+		const applied = [await holder, await queued];
+
+		assert.deepStrictEqual({ applied, folders }, { applied: [true, false], folders: [first.toString()] });
+	});
+
+	test('setFolderLocation() reports a failing onApplied callback and still applies the switch', async () => {
+		const first = joinPath(ROOT, 'Alternate');
+		const second = joinPath(ROOT, 'Alternate2');
+		const errors: unknown[] = [];
+		const previous = errorHandler.getUnexpectedErrorHandler();
+		setUnexpectedErrorHandler(e => errors.push(e));
+		disposables.add(toDisposable(() => setUnexpectedErrorHandler(previous)));
+		const failure = new Error('onApplied failed');
+
+		const applied = await testObject.setFolderLocation(first, { onApplied: () => { throw failure; } });
+		const next = await testObject.setFolderLocation(second);
+
+		assert.deepStrictEqual(
+			{ applied, next, folder: testObject.getWorkspace().folders[0].uri.toString(), errors },
+			{ applied: true, next: true, folder: second.toString(), errors: [failure] });
+	});
+
+	test('setFolderLocation() switches the folder and keeps the identity', async () => {
+		const alternate = joinPath(ROOT, 'Alternate');
+		const workspaceId = testObject.getWorkspace().id;
+		const target = sinon.spy();
+		disposables.add(testObject.onDidChangeWorkspaceFolders(target));
+
+		await testObject.setFolderLocation(alternate);
+
+		const actual = testObject.getWorkspace();
+		assert.deepStrictEqual(
+			{ id: actual.id, folder: actual.folders[0].uri.toString(), uri: actual.uri, name: actual.folders[0].name, events: target.callCount, isCurrent: testObject.isCurrentWorkspace(folder) },
+			{ id: workspaceId, folder: alternate.toString(), uri: folder, name: folderName, events: 1, isCurrent: true });
+
+		const second = joinPath(ROOT, 'Alternate2');
+		await testObject.setFolderLocation(second);
+		await testObject.setFolderLocation(folder);
+
+		const restored = testObject.getWorkspace();
+		assert.deepStrictEqual(
+			{ folder: restored.folders[0].uri.toString(), uri: restored.uri, events: target.callCount, isCurrent: testObject.isCurrentWorkspace(folder) },
+			{ folder: folder.toString(), uri: folder, events: 3, isCurrent: true });
+	});
 });
 
 suite('WorkspaceContextService - Workspace', () => {
@@ -228,7 +1367,7 @@ suite('WorkspaceContextService - Workspace', () => {
 		await fileService.createFolder(folderB);
 		await fileService.writeFile(configResource, VSBuffer.fromString(JSON.stringify(workspace, null, '\t')));
 
-		const instantiationService = <TestInstantiationService>workbenchInstantiationService(undefined, disposables);
+		const instantiationService = workbenchInstantiationService(undefined, disposables);
 		const environmentService = TestEnvironmentService;
 		const remoteAgentService = disposables.add(disposables.add(instantiationService.createInstance(RemoteAgentService)));
 		instantiationService.stub(IRemoteAgentService, remoteAgentService);
@@ -290,7 +1429,7 @@ suite('WorkspaceContextService - Workspace Editing', () => {
 		await fileService.createFolder(folderB);
 		await fileService.writeFile(configResource, VSBuffer.fromString(JSON.stringify(workspace, null, '\t')));
 
-		const instantiationService = <TestInstantiationService>workbenchInstantiationService(undefined, disposables);
+		const instantiationService = workbenchInstantiationService(undefined, disposables);
 		const environmentService = TestEnvironmentService;
 		const remoteAgentService = disposables.add(instantiationService.createInstance(RemoteAgentService));
 		instantiationService.stub(IRemoteAgentService, remoteAgentService);
@@ -538,7 +1677,7 @@ suite('WorkspaceService - Initialization', () => {
 		await fileService.createFolder(folderB);
 		await fileService.writeFile(configResource, VSBuffer.fromString(JSON.stringify(workspace, null, '\t')));
 
-		const instantiationService = <TestInstantiationService>workbenchInstantiationService(undefined, disposables);
+		const instantiationService = workbenchInstantiationService(undefined, disposables);
 		environmentService = TestEnvironmentService;
 		const remoteAgentService = disposables.add(instantiationService.createInstance(RemoteAgentService));
 		instantiationService.stub(IRemoteAgentService, remoteAgentService);
@@ -558,7 +1697,7 @@ suite('WorkspaceService - Initialization', () => {
 
 		await testObject.initialize({ id: '' });
 		instantiationService.stub(ITextFileService, disposables.add(instantiationService.createInstance(TestTextFileService)));
-		instantiationService.stub(ITextModelService, <ITextModelService>disposables.add(instantiationService.createInstance(TextModelResolverService)));
+		instantiationService.stub(ITextModelService, disposables.add(instantiationService.createInstance(TextModelResolverService)));
 		testObject.acquireInstantiationService(instantiationService);
 	});
 
@@ -751,6 +1890,11 @@ suite('WorkspaceConfigurationService - Folder', () => {
 					'default': 'isSet',
 					scope: ConfigurationScope.MACHINE
 				},
+				'configurationService.folder.applicationMachineSetting': {
+					'type': 'string',
+					'default': 'isSet',
+					scope: ConfigurationScope.APPLICATION_MACHINE
+				},
 				'configurationService.folder.machineOverridableSetting': {
 					'type': 'string',
 					'default': 'isSet',
@@ -776,7 +1920,19 @@ suite('WorkspaceConfigurationService - Folder', () => {
 					'default': 'isSet',
 					policy: {
 						name: 'configurationService.folder.policySetting',
+						category: PolicyCategory.Extensions,
 						minimumVersion: '1.0.0',
+						localization: { description: { key: '', value: '' } }
+					}
+				},
+				'configurationService.folder.policyObjectSetting': {
+					'type': 'object',
+					'default': {},
+					policy: {
+						name: 'configurationService.folder.policyObjectSetting',
+						category: PolicyCategory.Extensions,
+						minimumVersion: '1.0.0',
+						localization: { description: { key: '', value: '' } }
 					}
 				},
 			}
@@ -800,7 +1956,7 @@ suite('WorkspaceConfigurationService - Folder', () => {
 		const folder = joinPath(ROOT, 'a');
 		await fileService.createFolder(folder);
 
-		instantiationService = <TestInstantiationService>workbenchInstantiationService(undefined, disposables);
+		instantiationService = workbenchInstantiationService(undefined, disposables);
 		environmentService = TestEnvironmentService;
 		environmentService.policyFile = joinPath(folder, 'policies.json');
 		const remoteAgentService = disposables.add(instantiationService.createInstance(RemoteAgentService));
@@ -826,8 +1982,35 @@ suite('WorkspaceConfigurationService - Folder', () => {
 		workspaceService.acquireInstantiationService(instantiationService);
 	});
 
+	test('setFolderLocation() keeps memory settings', async () => {
+		const folder = testObject.getWorkspace().folders[0].uri;
+		const resource = joinPath(folder, 'a.txt');
+		await testObject.updateValue('configurationService.folder.testSetting', 'memoryValue', ConfigurationTarget.MEMORY);
+		await testObject.updateValue('configurationService.folder.testSetting', 'memoryResourceValue', { resource }, ConfigurationTarget.MEMORY);
+
+		await testObject.setFolderLocation(joinPath(ROOT, 'alternate'));
+		await testObject.setFolderLocation(folder);
+
+		assert.deepStrictEqual(
+			{ global: testObject.getValue('configurationService.folder.testSetting'), resource: testObject.getValue('configurationService.folder.testSetting', { resource }) },
+			{ global: 'memoryValue', resource: 'memoryResourceValue' });
+	});
+
 	test('defaults', () => {
-		assert.deepStrictEqual(testObject.getValue('configurationService'), { 'folder': { 'applicationSetting': 'isSet', 'machineSetting': 'isSet', 'machineOverridableSetting': 'isSet', 'testSetting': 'isSet', 'languageSetting': 'isSet', 'restrictedSetting': 'isSet', 'policySetting': 'isSet' } });
+		assert.deepStrictEqual(testObject.getValue('configurationService'),
+			{
+				'folder': {
+					'applicationSetting': 'isSet',
+					'machineSetting': 'isSet',
+					'applicationMachineSetting': 'isSet',
+					'machineOverridableSetting': 'isSet',
+					'testSetting': 'isSet',
+					'languageSetting': 'isSet',
+					'restrictedSetting': 'isSet',
+					'policySetting': 'isSet',
+					'policyObjectSetting': {}
+				}
+			});
 	});
 
 	test('globals override defaults', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
@@ -897,6 +2080,59 @@ suite('WorkspaceConfigurationService - Folder', () => {
 		assert.strictEqual(testObject.getValue('configurationService.folder.newMachineOverridableSetting'), 'workspaceValue');
 	}));
 
+	test('unregistered workspace settings are ignored when untrusted until they are registered', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		testObject.updateWorkspaceTrust(false);
+		await fileService.writeFile(joinPath(workspaceService.getWorkspace().folders[0].uri, '.vscode', 'settings.json'), VSBuffer.fromString('{ "configurationService.folder.lateSetting": "workspaceValue" }'));
+		await testObject.reloadConfiguration();
+		const beforeRegistration = testObject.getValue('configurationService.folder.lateSetting');
+		const node: IConfigurationNode = {
+			'id': '_test',
+			'type': 'object',
+			'properties': {
+				'configurationService.folder.lateSetting': {
+					'type': 'string',
+					'default': 'isSet'
+				}
+			}
+		};
+		configurationRegistry.registerConfiguration(node);
+		try {
+			assert.deepStrictEqual([beforeRegistration, testObject.getValue('configurationService.folder.lateSetting')], [undefined, 'workspaceValue']);
+		} finally {
+			configurationRegistry.deregisterConfigurations([node]);
+		}
+	}));
+
+	test('unregistered settings are not read from workspace when workspace is untrusted', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		const folder = workspaceService.getWorkspace().folders[0].uri;
+		const read = () => [
+			testObject.getValue('configurationService.folder.unregisteredSetting', { resource: folder }),
+			testObject.getValue('experiments.override.test', { resource: folder }),
+			testObject.getValue('configurationService.folder.testSetting', { resource: folder }),
+		];
+
+		testObject.updateWorkspaceTrust(false);
+		await fileService.writeFile(userDataProfileService.currentProfile.settingsResource, VSBuffer.fromString('{ "configurationService.folder.unregisteredSetting": "userValue" }'));
+		await fileService.writeFile(joinPath(folder, '.vscode', 'settings.json'), VSBuffer.fromString('{ "configurationService.folder.unregisteredSetting": "workspaceValue", "experiments.override.test": "workspaceValue", "configurationService.folder.testSetting": "workspaceValue" }'));
+		await testObject.reloadConfiguration();
+		const untrusted = read();
+		const changes: boolean[] = [];
+		disposables.add(testObject.onDidChangeConfiguration(e => changes.push(e.affectsConfiguration('experiments.override.test'))));
+
+		testObject.updateWorkspaceTrust(true);
+		const trusted = read();
+
+		testObject.updateWorkspaceTrust(false);
+		const untrustedAgain = read();
+
+		assert.deepStrictEqual({ untrusted, trusted, untrustedAgain, changes }, {
+			untrusted: ['userValue', undefined, 'workspaceValue'],
+			trusted: ['workspaceValue', 'workspaceValue', 'workspaceValue'],
+			untrustedAgain: ['userValue', undefined, 'workspaceValue'],
+			changes: [true, true],
+		});
+	}));
+
 	test('application settings are not read from workspace', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
 		await fileService.writeFile(userDataProfileService.currentProfile.settingsResource, VSBuffer.fromString('{ "configurationService.folder.applicationSetting": "userValue" }'));
 		await fileService.writeFile(joinPath(workspaceService.getWorkspace().folders[0].uri, '.vscode', 'settings.json'), VSBuffer.fromString('{ "configurationService.folder.applicationSetting": "workspaceValue" }'));
@@ -933,7 +2169,25 @@ suite('WorkspaceConfigurationService - Folder', () => {
 		assert.strictEqual(testObject.getValue('configurationService.folder.machineSetting', { resource: workspaceService.getWorkspace().folders[0].uri }), 'userValue');
 	}));
 
-	test('get application scope settings are not loaded after defaults are registered', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+	test('application machine overridable settings are not read from workspace', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		await fileService.writeFile(userDataProfileService.currentProfile.settingsResource, VSBuffer.fromString('{ "configurationService.folder.applicationMachineSetting": "userValue" }'));
+		await fileService.writeFile(joinPath(workspaceService.getWorkspace().folders[0].uri, '.vscode', 'settings.json'), VSBuffer.fromString('{ "configurationService.folder.applicationMachineSetting": "workspaceValue" }'));
+
+		await testObject.reloadConfiguration();
+
+		assert.strictEqual(testObject.getValue('configurationService.folder.applicationMachineSetting'), 'userValue');
+	}));
+
+	test('application machine overridable settings are not read from workspace when workspace folder uri is passed', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		await fileService.writeFile(userDataProfileService.currentProfile.settingsResource, VSBuffer.fromString('{ "configurationService.folder.applicationMachineSetting": "userValue" }'));
+		await fileService.writeFile(joinPath(workspaceService.getWorkspace().folders[0].uri, '.vscode', 'settings.json'), VSBuffer.fromString('{ "configurationService.folder.applicationMachineSetting": "workspaceValue" }'));
+
+		await testObject.reloadConfiguration();
+
+		assert.strictEqual(testObject.getValue('configurationService.folder.applicationMachineSetting', { resource: workspaceService.getWorkspace().folders[0].uri }), 'userValue');
+	}));
+
+	test('get application scope settings are loaded after defaults are registered', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
 		await fileService.writeFile(userDataProfileService.currentProfile.settingsResource, VSBuffer.fromString('{ "configurationService.folder.applicationSetting-2": "userValue" }'));
 		await fileService.writeFile(joinPath(workspaceService.getWorkspace().folders[0].uri, '.vscode', 'settings.json'), VSBuffer.fromString('{ "configurationService.folder.applicationSetting-2": "workspaceValue" }'));
 
@@ -981,6 +2235,56 @@ suite('WorkspaceConfigurationService - Folder', () => {
 
 		await testObject.reloadConfiguration();
 		assert.strictEqual(testObject.getValue('configurationService.folder.applicationSetting-3', { resource: workspaceService.getWorkspace().folders[0].uri }), 'userValue');
+	}));
+
+	test('get application machine overridable scope settings are loaded after defaults are registered', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		await fileService.writeFile(userDataProfileService.currentProfile.settingsResource, VSBuffer.fromString('{ "configurationService.folder.applicationMachineSetting-2": "userValue" }'));
+		await fileService.writeFile(joinPath(workspaceService.getWorkspace().folders[0].uri, '.vscode', 'settings.json'), VSBuffer.fromString('{ "configurationService.folder.applicationMachineSetting-2": "workspaceValue" }'));
+
+		await testObject.reloadConfiguration();
+		assert.strictEqual(testObject.getValue('configurationService.folder.applicationMachineSetting-2'), 'workspaceValue');
+
+		configurationRegistry.registerConfiguration({
+			'id': '_test',
+			'type': 'object',
+			'properties': {
+				'configurationService.folder.applicationMachineSetting-2': {
+					'type': 'string',
+					'default': 'isSet',
+					scope: ConfigurationScope.APPLICATION
+				}
+			}
+		});
+
+		assert.strictEqual(testObject.getValue('configurationService.folder.applicationMachineSetting-2'), 'userValue');
+
+		await testObject.reloadConfiguration();
+		assert.strictEqual(testObject.getValue('configurationService.folder.applicationMachineSetting-2'), 'userValue');
+	}));
+
+	test('get application machine overridable scope settings are loaded after defaults are registered when workspace folder uri is passed', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		await fileService.writeFile(userDataProfileService.currentProfile.settingsResource, VSBuffer.fromString('{ "configurationService.folder.applicationMachineSetting-3": "userValue" }'));
+		await fileService.writeFile(joinPath(workspaceService.getWorkspace().folders[0].uri, '.vscode', 'settings.json'), VSBuffer.fromString('{ "configurationService.folder.applicationMachineSetting-3": "workspaceValue" }'));
+
+		await testObject.reloadConfiguration();
+		assert.strictEqual(testObject.getValue('configurationService.folder.applicationMachineSetting-3', { resource: workspaceService.getWorkspace().folders[0].uri }), 'workspaceValue');
+
+		configurationRegistry.registerConfiguration({
+			'id': '_test',
+			'type': 'object',
+			'properties': {
+				'configurationService.folder.applicationMachineSetting-3': {
+					'type': 'string',
+					'default': 'isSet',
+					scope: ConfigurationScope.APPLICATION
+				}
+			}
+		});
+
+		assert.strictEqual(testObject.getValue('configurationService.folder.applicationMachineSetting-3', { resource: workspaceService.getWorkspace().folders[0].uri }), 'userValue');
+
+		await testObject.reloadConfiguration();
+		assert.strictEqual(testObject.getValue('configurationService.folder.applicationMachineSetting-3', { resource: workspaceService.getWorkspace().folders[0].uri }), 'userValue');
 	}));
 
 	test('get machine scope settings are not loaded after defaults are registered', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
@@ -1034,11 +2338,9 @@ suite('WorkspaceConfigurationService - Folder', () => {
 	}));
 
 	test('policy value override all', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
-		const result = await runWithFakedTimers({ useFakeTimers: true }, async () => {
-			const promise = Event.toPromise(testObject.onDidChangeConfiguration);
-			await fileService.writeFile(environmentService.policyFile!, VSBuffer.fromString('{ "configurationService.folder.policySetting": "policyValue" }'));
-			return promise;
-		});
+		const promise = Event.toPromise(testObject.onDidChangeConfiguration);
+		await fileService.writeFile(environmentService.policyFile!, VSBuffer.fromString('{ "configurationService.folder.policySetting": "policyValue" }'));
+		const result = await promise;
 		assert.deepStrictEqual([...result.affectedKeys], ['configurationService.folder.policySetting']);
 		assert.strictEqual(testObject.getValue('configurationService.folder.policySetting'), 'policyValue');
 		assert.strictEqual(testObject.inspect('configurationService.folder.policySetting').policyValue, 'policyValue');
@@ -1050,6 +2352,17 @@ suite('WorkspaceConfigurationService - Folder', () => {
 		await testObject.reloadConfiguration();
 		assert.strictEqual(testObject.getValue('configurationService.folder.policySetting'), 'workspaceValue');
 		assert.strictEqual(testObject.inspect('configurationService.folder.policySetting').policyValue, undefined);
+	}));
+
+	test('policy value override all for object type setting', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		const promise = Event.toPromise(testObject.onDidChangeConfiguration);
+		await fileService.writeFile(environmentService.policyFile!, VSBuffer.fromString('{ "configurationService.folder.policyObjectSetting": {"a": true} }'));
+		await promise;
+
+		await fileService.writeFile(userDataProfileService.currentProfile.settingsResource, VSBuffer.fromString('{ "configurationService.folder.policyObjectSetting": {"b": true} }'));
+		await testObject.reloadConfiguration();
+
+		assert.deepStrictEqual(testObject.getValue('configurationService.folder.policyObjectSetting'), { a: true });
 	}));
 
 	test('reload configuration emits events after global configuraiton changes', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
@@ -1122,17 +2435,17 @@ suite('WorkspaceConfigurationService - Folder', () => {
 		assert.strictEqual(actual.application, undefined);
 		assert.deepStrictEqual(actual.userValue, {});
 		assert.deepStrictEqual(actual.workspaceValue, {
-			"configurationService": {
-				"tasks": {
-					"testSetting": "tasksValue"
+			'configurationService': {
+				'tasks': {
+					'testSetting': 'tasksValue'
 				}
 			}
 		});
 		assert.strictEqual(actual.workspaceFolderValue, undefined);
 		assert.deepStrictEqual(actual.value, {
-			"configurationService": {
-				"tasks": {
-					"testSetting": "tasksValue"
+			'configurationService': {
+				'tasks': {
+					'testSetting': 'tasksValue'
 				}
 			}
 		});
@@ -1178,17 +2491,17 @@ suite('WorkspaceConfigurationService - Folder', () => {
 		assert.strictEqual(actual.application, undefined);
 		assert.deepStrictEqual(actual.userValue, {});
 		assert.deepStrictEqual(actual.workspaceValue, {
-			"configurationService": {
-				"tasks": {
-					"testSetting": "tasksValue"
+			'configurationService': {
+				'tasks': {
+					'testSetting': 'tasksValue'
 				}
 			}
 		});
 		assert.strictEqual(actual.workspaceFolderValue, undefined);
 		assert.deepStrictEqual(actual.value, {
-			"configurationService": {
-				"tasks": {
-					"testSetting": "tasksValue"
+			'configurationService': {
+				'tasks': {
+					'testSetting': 'tasksValue'
 				}
 			}
 		});
@@ -1210,17 +2523,17 @@ suite('WorkspaceConfigurationService - Folder', () => {
 		assert.strictEqual(actual.application, undefined);
 		assert.deepStrictEqual(actual.userValue, {});
 		assert.deepStrictEqual(actual.workspaceValue, {
-			"configurationService": {
-				"tasks": {
-					"testSetting": "tasksValue"
+			'configurationService': {
+				'tasks': {
+					'testSetting': 'tasksValue'
 				}
 			}
 		});
 		assert.strictEqual(actual.workspaceFolderValue, undefined);
 		assert.deepStrictEqual(actual.value, {
-			"configurationService": {
-				"tasks": {
-					"testSetting": "tasksValue"
+			'configurationService': {
+				'tasks': {
+					'testSetting': 'tasksValue'
 				}
 			}
 		});
@@ -1330,6 +2643,11 @@ suite('WorkspaceConfigurationService - Folder', () => {
 
 	test('update application setting into workspace configuration in a workspace is not supported', () => {
 		return testObject.updateValue('configurationService.folder.applicationSetting', 'workspaceValue', {}, ConfigurationTarget.WORKSPACE, { donotNotifyError: true })
+			.then(() => assert.fail('Should not be supported'), (e) => assert.strictEqual(e.code, ConfigurationEditingErrorCode.ERROR_INVALID_WORKSPACE_CONFIGURATION_APPLICATION));
+	});
+
+	test('update application machine overridable setting into workspace configuration in a workspace is not supported', () => {
+		return testObject.updateValue('configurationService.folder.applicationMachineSetting', 'workspaceValue', {}, ConfigurationTarget.WORKSPACE, { donotNotifyError: true })
 			.then(() => assert.fail('Should not be supported'), (e) => assert.strictEqual(e.code, ConfigurationEditingErrorCode.ERROR_INVALID_WORKSPACE_CONFIGURATION_APPLICATION));
 	});
 
@@ -1587,6 +2905,11 @@ suite('WorkspaceConfigurationService - Profiles', () => {
 					'default': 'isSet',
 					scope: ConfigurationScope.APPLICATION
 				},
+				'configurationService.profiles.applicationMachineSetting': {
+					'type': 'string',
+					'default': 'isSet',
+					scope: ConfigurationScope.APPLICATION_MACHINE
+				},
 				'configurationService.profiles.testSetting': {
 					'type': 'string',
 					'default': 'isSet',
@@ -1613,7 +2936,7 @@ suite('WorkspaceConfigurationService - Profiles', () => {
 		const folder = joinPath(ROOT, 'a');
 		await fileService.createFolder(folder);
 
-		instantiationService = <TestInstantiationService>workbenchInstantiationService(undefined, disposables);
+		instantiationService = workbenchInstantiationService(undefined, disposables);
 		environmentService = TestEnvironmentService;
 		environmentService.policyFile = joinPath(folder, 'policies.json');
 		const remoteAgentService = disposables.add(instantiationService.createInstance(RemoteAgentService));
@@ -1637,7 +2960,7 @@ suite('WorkspaceConfigurationService - Profiles', () => {
 		await workspaceService.initialize(convertToWorkspacePayload(folder));
 		instantiationService.stub(IKeybindingEditingService, disposables.add(instantiationService.createInstance(KeybindingsEditingService)));
 		instantiationService.stub(ITextFileService, disposables.add(instantiationService.createInstance(TestTextFileService)));
-		instantiationService.stub(ITextModelService, <ITextModelService>disposables.add(instantiationService.createInstance(TextModelResolverService)));
+		instantiationService.stub(ITextModelService, disposables.add(instantiationService.createInstance(TextModelResolverService)));
 		workspaceService.acquireInstantiationService(instantiationService);
 	});
 
@@ -1693,6 +3016,13 @@ suite('WorkspaceConfigurationService - Profiles', () => {
 		assert.strictEqual(testObject.getValue('configurationService.profiles.applicationSetting'), 'applicationValue');
 	}));
 
+	test('update application machine setting', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		await testObject.updateValue('configurationService.profiles.applicationMachineSetting', 'applicationValue');
+
+		assert.deepStrictEqual(JSON.parse((await fileService.readFile(instantiationService.get(IUserDataProfilesService).defaultProfile.settingsResource)).value.toString()), { 'configurationService.profiles.applicationMachineSetting': 'applicationValue', 'configurationService.profiles.applicationSetting2': 'applicationValue', 'configurationService.profiles.testSetting2': 'userValue' });
+		assert.strictEqual(testObject.getValue('configurationService.profiles.applicationMachineSetting'), 'applicationValue');
+	}));
+
 	test('update normal setting', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
 		await testObject.updateValue('configurationService.profiles.testSetting', 'profileValue');
 
@@ -1735,6 +3065,12 @@ suite('WorkspaceConfigurationService - Profiles', () => {
 		});
 
 		assert.strictEqual(testObject.getValue('configurationService.profiles.applicationSetting3'), 'defaultProfile');
+	}));
+
+	test('non registering setting should not be read from default profile', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		await fileService.writeFile(instantiationService.get(IUserDataProfilesService).defaultProfile.settingsResource, VSBuffer.fromString('{ "configurationService.profiles.nonregistered": "defaultProfile" }'));
+		await testObject.reloadConfiguration();
+		assert.strictEqual(testObject.getValue('configurationService.profiles.nonregistered'), undefined);
 	}));
 
 	test('initialize with custom all profiles settings', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
@@ -1968,7 +3304,7 @@ suite('WorkspaceConfigurationService-Multiroot', () => {
 		await fileService.createFolder(folderB);
 		await fileService.writeFile(configResource, VSBuffer.fromString(JSON.stringify(workspace, null, '\t')));
 
-		const instantiationService = <TestInstantiationService>workbenchInstantiationService(undefined, disposables);
+		const instantiationService = workbenchInstantiationService(undefined, disposables);
 		environmentService = TestEnvironmentService;
 		const remoteAgentService = disposables.add(instantiationService.createInstance(RemoteAgentService));
 		instantiationService.stub(IRemoteAgentService, remoteAgentService);
@@ -1990,7 +3326,7 @@ suite('WorkspaceConfigurationService-Multiroot', () => {
 		await workspaceService.initialize(getWorkspaceIdentifier(configResource));
 		instantiationService.stub(IKeybindingEditingService, disposables.add(instantiationService.createInstance(KeybindingsEditingService)));
 		instantiationService.stub(ITextFileService, disposables.add(instantiationService.createInstance(TestTextFileService)));
-		instantiationService.stub(ITextModelService, <ITextModelService>disposables.add(instantiationService.createInstance(TextModelResolverService)));
+		instantiationService.stub(ITextModelService, disposables.add(instantiationService.createInstance(TextModelResolverService)));
 		jsonEditingServce = instantiationService.createInstance(JSONEditingService);
 		instantiationService.stub(IJSONEditingService, jsonEditingServce);
 		workspaceService.acquireInstantiationService(instantiationService);
@@ -2000,21 +3336,21 @@ suite('WorkspaceConfigurationService-Multiroot', () => {
 	});
 
 	test('application settings are not read from workspace', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
-		await fileService.writeFile(userDataProfileService.currentProfile.settingsResource, VSBuffer.fromString('{ "configurationService.folder.applicationSetting": "userValue" }'));
+		await fileService.writeFile(userDataProfileService.currentProfile.settingsResource, VSBuffer.fromString('{ "configurationService.workspace.applicationSetting": "userValue" }'));
 		await jsonEditingServce.write(workspaceContextService.getWorkspace().configuration!, [{ path: ['settings'], value: { 'configurationService.workspace.applicationSetting': 'workspaceValue' } }], true);
 
 		await testObject.reloadConfiguration();
 
-		assert.strictEqual(testObject.getValue('configurationService.folder.applicationSetting'), 'userValue');
+		assert.strictEqual(testObject.getValue('configurationService.workspace.applicationSetting'), 'userValue');
 	}));
 
 	test('application settings are not read from workspace when folder is passed', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
-		await fileService.writeFile(userDataProfileService.currentProfile.settingsResource, VSBuffer.fromString('{ "configurationService.folder.applicationSetting": "userValue" }'));
+		await fileService.writeFile(userDataProfileService.currentProfile.settingsResource, VSBuffer.fromString('{ "configurationService.workspace.applicationSetting": "userValue" }'));
 		await jsonEditingServce.write(workspaceContextService.getWorkspace().configuration!, [{ path: ['settings'], value: { 'configurationService.workspace.applicationSetting': 'workspaceValue' } }], true);
 
 		await testObject.reloadConfiguration();
 
-		assert.strictEqual(testObject.getValue('configurationService.folder.applicationSetting', { resource: workspaceContextService.getWorkspace().folders[0].uri }), 'userValue');
+		assert.strictEqual(testObject.getValue('configurationService.workspace.applicationSetting', { resource: workspaceContextService.getWorkspace().folders[0].uri }), 'userValue');
 	}));
 
 	test('machine settings are not read from workspace', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
@@ -2634,6 +3970,31 @@ suite('WorkspaceConfigurationService-Multiroot', () => {
 		assert.deepStrictEqual(testObject.restrictedSettings.workspaceFolder?.get(testObject.getWorkspace().folders[1].uri), ['configurationService.workspace.testRestrictedSetting2']);
 	}));
 
+	test('unregistered settings are not read from workspace and workspace folders when workspace is not trusted', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		const folders = testObject.getWorkspace().folders;
+		const read = () => [
+			testObject.getValue('experiments.override.test', { resource: folders[0].uri }),
+			testObject.getValue('experiments.override.folder', { resource: folders[1].uri }),
+		];
+
+		testObject.updateWorkspaceTrust(false);
+		await jsonEditingServce.write((workspaceContextService.getWorkspace().configuration!), [{ path: ['settings'], value: { 'experiments.override.test': 'workspaceValue' } }], true);
+		await fileService.writeFile(joinPath(folders[1].uri, '.vscode', 'settings.json'), VSBuffer.fromString('{ "experiments.override.folder": "folderValue" }'));
+		await testObject.reloadConfiguration();
+		const untrusted = read();
+
+		const changes: boolean[] = [];
+		disposables.add(testObject.onDidChangeConfiguration(e => changes.push(e.affectsConfiguration('experiments.override'))));
+		testObject.updateWorkspaceTrust(true);
+		const trusted = read();
+
+		assert.deepStrictEqual({ untrusted, trusted, changes }, {
+			untrusted: [undefined, undefined],
+			trusted: ['workspaceValue', 'folderValue'],
+			changes: [true],
+		});
+	}));
+
 	test('remove an unregistered setting', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
 		const key = 'configurationService.workspace.unknownSetting';
 		await fileService.writeFile(userDataProfileService.currentProfile.settingsResource, VSBuffer.fromString('{ "configurationService.workspace.unknownSetting": "userValue" }'));
@@ -2682,6 +4043,11 @@ suite('WorkspaceConfigurationService - Remote Folder', () => {
 					'default': 'isSet',
 					scope: ConfigurationScope.MACHINE
 				},
+				'configurationService.remote.applicationMachineSetting': {
+					'type': 'string',
+					'default': 'isSet',
+					scope: ConfigurationScope.APPLICATION_MACHINE
+				},
 				'configurationService.remote.machineOverridableSetting': {
 					'type': 'string',
 					'default': 'isSet',
@@ -2709,7 +4075,7 @@ suite('WorkspaceConfigurationService - Remote Folder', () => {
 		machineSettingsResource = joinPath(ROOT, 'machine-settings.json');
 		remoteSettingsResource = machineSettingsResource.with({ scheme: Schemas.vscodeRemote, authority: remoteAuthority });
 
-		instantiationService = <TestInstantiationService>workbenchInstantiationService(undefined, disposables);
+		instantiationService = workbenchInstantiationService(undefined, disposables);
 		environmentService = TestEnvironmentService;
 		const remoteEnvironmentPromise = new Promise<Partial<IRemoteAgentEnvironment>>(c => resolveRemoteEnvironment = () => c({ settingsPath: remoteSettingsResource }));
 		const remoteAgentService = instantiationService.stub(IRemoteAgentService, <Partial<IRemoteAgentService>>{ getEnvironment: () => remoteEnvironmentPromise });
@@ -2746,7 +4112,7 @@ suite('WorkspaceConfigurationService - Remote Folder', () => {
 		}));
 	}
 
-	test('remote settings override globals', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+	test('remote machine settings override globals', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
 		await fileService.writeFile(machineSettingsResource, VSBuffer.fromString('{ "configurationService.remote.machineSetting": "remoteValue" }'));
 		registerRemoteFileSystemProvider();
 		resolveRemoteEnvironment();
@@ -2754,7 +4120,7 @@ suite('WorkspaceConfigurationService - Remote Folder', () => {
 		assert.strictEqual(testObject.getValue('configurationService.remote.machineSetting'), 'remoteValue');
 	}));
 
-	test('remote settings override globals after remote provider is registered on activation', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+	test('remote machine settings override globals after remote provider is registered on activation', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
 		await fileService.writeFile(machineSettingsResource, VSBuffer.fromString('{ "configurationService.remote.machineSetting": "remoteValue" }'));
 		resolveRemoteEnvironment();
 		registerRemoteFileSystemProviderOnActivation();
@@ -2762,7 +4128,7 @@ suite('WorkspaceConfigurationService - Remote Folder', () => {
 		assert.strictEqual(testObject.getValue('configurationService.remote.machineSetting'), 'remoteValue');
 	}));
 
-	test('remote settings override globals after remote environment is resolved', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+	test('remote machine settings override globals after remote environment is resolved', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
 		await fileService.writeFile(machineSettingsResource, VSBuffer.fromString('{ "configurationService.remote.machineSetting": "remoteValue" }'));
 		registerRemoteFileSystemProvider();
 		await initialize();
@@ -2810,6 +4176,70 @@ suite('WorkspaceConfigurationService - Remote Folder', () => {
 		assert.strictEqual(testObject.getValue('configurationService.remote.machineSetting'), 'isSet');
 	}));
 
+	test('remote application machine settings override globals', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		await fileService.writeFile(machineSettingsResource, VSBuffer.fromString('{ "configurationService.remote.applicationMachineSetting": "remoteValue" }'));
+		registerRemoteFileSystemProvider();
+		resolveRemoteEnvironment();
+		await initialize();
+		assert.strictEqual(testObject.getValue('configurationService.remote.applicationMachineSetting'), 'remoteValue');
+	}));
+
+	test('remote application machine settings override globals after remote provider is registered on activation', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		await fileService.writeFile(machineSettingsResource, VSBuffer.fromString('{ "configurationService.remote.applicationMachineSetting": "remoteValue" }'));
+		resolveRemoteEnvironment();
+		registerRemoteFileSystemProviderOnActivation();
+		await initialize();
+		assert.strictEqual(testObject.getValue('configurationService.remote.applicationMachineSetting'), 'remoteValue');
+	}));
+
+	test('remote application machine settings override globals after remote environment is resolved', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		await fileService.writeFile(machineSettingsResource, VSBuffer.fromString('{ "configurationService.remote.applicationMachineSetting": "remoteValue" }'));
+		registerRemoteFileSystemProvider();
+		await initialize();
+		const promise = new Promise<void>((c, e) => {
+			disposables.add(testObject.onDidChangeConfiguration(event => {
+				try {
+					assert.strictEqual(event.source, ConfigurationTarget.USER);
+					assert.deepStrictEqual([...event.affectedKeys], ['configurationService.remote.applicationMachineSetting']);
+					assert.strictEqual(testObject.getValue('configurationService.remote.applicationMachineSetting'), 'remoteValue');
+					c();
+				} catch (error) {
+					e(error);
+				}
+			}));
+		});
+		resolveRemoteEnvironment();
+		return promise;
+	}));
+
+	test('remote application machine settings override globals after remote provider is registered on activation and remote environment is resolved', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		await fileService.writeFile(machineSettingsResource, VSBuffer.fromString('{ "configurationService.remote.applicationMachineSetting": "remoteValue" }'));
+		registerRemoteFileSystemProviderOnActivation();
+		await initialize();
+		const promise = new Promise<void>((c, e) => {
+			disposables.add(testObject.onDidChangeConfiguration(event => {
+				try {
+					assert.strictEqual(event.source, ConfigurationTarget.USER);
+					assert.deepStrictEqual([...event.affectedKeys], ['configurationService.remote.applicationMachineSetting']);
+					assert.strictEqual(testObject.getValue('configurationService.remote.applicationMachineSetting'), 'remoteValue');
+					c();
+				} catch (error) {
+					e(error);
+				}
+			}));
+		});
+		resolveRemoteEnvironment();
+		return promise;
+	}));
+
+	test('application machine settings in local user settings does not override defaults', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		await fileService.writeFile(userDataProfileService.currentProfile.settingsResource, VSBuffer.fromString('{ "configurationService.remote.applicationMachineSetting": "globalValue" }'));
+		registerRemoteFileSystemProvider();
+		resolveRemoteEnvironment();
+		await initialize();
+		assert.strictEqual(testObject.getValue('configurationService.remote.applicationMachineSetting'), 'isSet');
+	}));
+
 	test('machine overridable settings in local user settings does not override defaults', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
 		await fileService.writeFile(userDataProfileService.currentProfile.settingsResource, VSBuffer.fromString('{ "configurationService.remote.machineOverridableSetting": "globalValue" }'));
 		registerRemoteFileSystemProvider();
@@ -2834,6 +4264,16 @@ suite('WorkspaceConfigurationService - Remote Folder', () => {
 		await testObject.updateValue('configurationService.remote.machineSetting', 'machineValue');
 		await testObject.reloadConfiguration();
 		assert.strictEqual(testObject.inspect('configurationService.remote.machineSetting').userRemoteValue, 'machineValue');
+	}));
+
+	test('application machine setting is written in remote settings', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		registerRemoteFileSystemProvider();
+		resolveRemoteEnvironment();
+		await initialize();
+		await testObject.updateValue('configurationService.remote.applicationMachineSetting', 'machineValue');
+		await testObject.reloadConfiguration();
+		const actual = testObject.inspect('configurationService.remote.applicationMachineSetting');
+		assert.strictEqual(actual.userRemoteValue, 'machineValue');
 	}));
 
 	test('machine overridable setting is written in remote settings', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {

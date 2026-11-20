@@ -3,10 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { CharCode } from 'vs/base/common/charCode';
-import { MarshalledId } from 'vs/base/common/marshallingIds';
-import * as paths from 'vs/base/common/path';
-import { isWindows } from 'vs/base/common/platform';
+import { CharCode } from './charCode.js';
+import { MarshalledId } from './marshallingIds.js';
+import * as paths from './path.js';
+import { isWindows } from './platform.js';
 
 const _schemePattern = /^\w[\w\d+.-]*$/;
 const _singleSlashStart = /^\//;
@@ -22,7 +22,11 @@ function _validateUri(ret: URI, _strict?: boolean): void {
 	// scheme, https://tools.ietf.org/html/rfc3986#section-3.1
 	// ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
 	if (ret.scheme && !_schemePattern.test(ret.scheme)) {
-		throw new Error('[UriError]: Scheme contains illegal characters.');
+		const matches = [...ret.scheme.matchAll(/[^\w\d+.-]/gu)];
+		const detail = matches.length > 0
+			? ` Found '${matches[0][0]}' at index ${matches[0].index} (${matches.length} total)`
+			: '';
+		throw new Error(`[UriError]: Scheme contains illegal characters.${detail} (len:${ret.scheme.length})`);
 	}
 
 	// path, http://tools.ietf.org/html/rfc3986#section-3.3
@@ -97,11 +101,11 @@ const _regexp = /^(([^:/?#]+?):)?(\/\/([^/?#]*))?([^?#]*)(\?([^#]*))?(#(.*))?/;
  */
 export class URI implements UriComponents {
 
-	static isUri(thing: any): thing is URI {
+	static isUri(thing: unknown): thing is URI {
 		if (thing instanceof URI) {
 			return true;
 		}
-		if (!thing) {
+		if (!thing || typeof thing !== 'object') {
 			return false;
 		}
 		return typeof (<URI>thing).authority === 'string'
@@ -355,7 +359,7 @@ export class URI implements UriComponents {
 	 */
 	static joinPath(uri: URI, ...pathFragment: string[]): URI {
 		if (!uri.path) {
-			throw new Error(`[UriError]: cannot call joinPath on URI without path`);
+			throw new Error(`[UriError]: cannot call joinPath on URI without path: ${uri.toString()}`);
 		}
 		let newPath: string;
 		if (isWindows && uri.scheme === 'file') {
@@ -413,6 +417,10 @@ export class URI implements UriComponents {
 			return result;
 		}
 	}
+
+	[Symbol.for('debug.description')]() {
+		return `URI(${this.toString()})`;
+	}
 }
 
 export interface UriComponents {
@@ -423,7 +431,7 @@ export interface UriComponents {
 	fragment?: string;
 }
 
-export function isUriComponents(thing: any): thing is UriComponents {
+export function isUriComponents(thing: unknown): thing is UriComponents {
 	if (!thing || typeof thing !== 'object') {
 		return false;
 	}
@@ -469,6 +477,7 @@ class Uri extends URI {
 	}
 
 	override toJSON(): UriComponents {
+		// eslint-disable-next-line local/code-no-dangerous-type-assertions
 		const res = <UriState>{
 			$mid: MarshalledId.Uri
 		};
@@ -594,21 +603,31 @@ function encodeURIComponentFast(uriComponent: string, isPath: boolean, isAuthori
 }
 
 function encodeURIComponentMinimal(path: string): string {
-	let res: string | undefined = undefined;
-	for (let pos = 0; pos < path.length; pos++) {
+	let pos = path.indexOf('?');
+	const hashPos = path.indexOf('#');
+	if (pos === -1 || (hashPos !== -1 && hashPos < pos)) {
+		pos = hashPos;
+	}
+	if (pos === -1) {
+		return path;
+	}
+
+	let res = path.substring(0, pos);
+	let copyStart = pos;
+	for (; pos < path.length; pos++) {
 		const code = path.charCodeAt(pos);
 		if (code === CharCode.Hash || code === CharCode.QuestionMark) {
-			if (res === undefined) {
-				res = path.substr(0, pos);
+			if (copyStart < pos) {
+				res += path.substring(copyStart, pos);
 			}
 			res += encodeTable[code];
-		} else {
-			if (res !== undefined) {
-				res += path[pos];
-			}
+			copyStart = pos + 1;
 		}
 	}
-	return res !== undefined ? res : path;
+	if (copyStart < path.length) {
+		res += path.substring(copyStart);
+	}
+	return res;
 }
 
 /**
@@ -666,14 +685,14 @@ function _asFormatted(uri: URI, skipEncoding: boolean): string {
 			// <user>@<auth>
 			const userinfo = authority.substr(0, idx);
 			authority = authority.substr(idx + 1);
-			idx = userinfo.lastIndexOf(':');
+			idx = userinfo.indexOf(':');
 			if (idx === -1) {
 				res += encoder(userinfo, false, false);
 			} else {
 				// <user>:<pass>@<auth>
 				res += encoder(userinfo.substr(0, idx), false, false);
 				res += ':';
-				res += encoder(userinfo.substr(idx + 1), false, true);
+				res += encoder(userinfo.substr(idx + 1), false, false);
 			}
 			res += '@';
 		}
@@ -688,15 +707,16 @@ function _asFormatted(uri: URI, skipEncoding: boolean): string {
 		}
 	}
 	if (path) {
-		// lower-case windows drive letters in /C:/fff or C:/fff
+		// HTTP paths are case-sensitive, even when their first segment resembles a drive letter.
+		const lowerScheme = scheme.toLowerCase();
 		if (path.length >= 3 && path.charCodeAt(0) === CharCode.Slash && path.charCodeAt(2) === CharCode.Colon) {
 			const code = path.charCodeAt(1);
-			if (code >= CharCode.A && code <= CharCode.Z) {
+			if (code >= CharCode.A && code <= CharCode.Z && lowerScheme !== 'http' && lowerScheme !== 'https') {
 				path = `/${String.fromCharCode(code + 32)}:${path.substr(3)}`; // "/c:".length === 3
 			}
 		} else if (path.length >= 2 && path.charCodeAt(1) === CharCode.Colon) {
 			const code = path.charCodeAt(0);
-			if (code >= CharCode.A && code <= CharCode.Z) {
+			if (code >= CharCode.A && code <= CharCode.Z && lowerScheme !== 'http' && lowerScheme !== 'https') {
 				path = `${String.fromCharCode(code + 32)}:${path.substr(2)}`; // "/c:".length === 3
 			}
 		}

@@ -3,25 +3,25 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { URI } from 'vs/base/common/uri';
-import { isEqual } from 'vs/base/common/extpath';
-import { posix } from 'vs/base/common/path';
-import { ResourceMap } from 'vs/base/common/map';
-import { IFileStat, IFileService, FileSystemProviderCapabilities } from 'vs/platform/files/common/files';
-import { rtrim, startsWithIgnoreCase, equalsIgnoreCase } from 'vs/base/common/strings';
-import { coalesce } from 'vs/base/common/arrays';
-import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
-import { IDisposable, dispose } from 'vs/base/common/lifecycle';
-import { memoize } from 'vs/base/common/decorators';
-import { Emitter, Event } from 'vs/base/common/event';
-import { joinPath, isEqualOrParent, basenameOrAuthority } from 'vs/base/common/resources';
-import { IFilesConfiguration, SortOrder } from 'vs/workbench/contrib/files/common/files';
-import { IUriIdentityService } from 'vs/platform/uriIdentity/common/uriIdentity';
-import { ExplorerFileNestingTrie } from 'vs/workbench/contrib/files/common/explorerFileNestingTrie';
-import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { assertIsDefined } from 'vs/base/common/types';
-import { IFilesConfigurationService } from 'vs/workbench/services/filesConfiguration/common/filesConfigurationService';
-import { IMarkdownString } from 'vs/base/common/htmlContent';
+import { URI } from '../../../../base/common/uri.js';
+import { isEqual } from '../../../../base/common/extpath.js';
+import { posix } from '../../../../base/common/path.js';
+import { ResourceMap } from '../../../../base/common/map.js';
+import { IFileStat, IFileService, FileSystemProviderCapabilities } from '../../../../platform/files/common/files.js';
+import { rtrim, startsWithIgnoreCase, equalsIgnoreCase } from '../../../../base/common/strings.js';
+import { coalesce } from '../../../../base/common/arrays.js';
+import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { IDisposable, dispose } from '../../../../base/common/lifecycle.js';
+import { memoize } from '../../../../base/common/decorators.js';
+import { Emitter, Event } from '../../../../base/common/event.js';
+import { joinPath, isEqualOrParent, basenameOrAuthority } from '../../../../base/common/resources.js';
+import { IFilesConfiguration, SortOrder } from './files.js';
+import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
+import { ExplorerFileNestingTrie } from './explorerFileNestingTrie.js';
+import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
+import { assertReturnsDefined } from '../../../../base/common/types.js';
+import { IFilesConfigurationService } from '../../../services/filesConfiguration/common/filesConfigurationService.js';
+import { IMarkdownString } from '../../../../base/common/htmlContent.js';
 
 export class ExplorerModel implements IDisposable {
 
@@ -81,6 +81,7 @@ export class ExplorerModel implements IDisposable {
 	}
 
 	dispose(): void {
+		this._onDidChangeRoots.dispose();
 		dispose(this._listener);
 	}
 }
@@ -92,6 +93,11 @@ export class ExplorerItem {
 
 	public nestedParent: ExplorerItem | undefined;
 	public nestedChildren: ExplorerItem[] | undefined;
+
+	private _id: string | undefined;
+	private _idResource: URI | undefined;
+	private _idRootResource: URI | undefined;
+	private _idMarkedAsFiltered = false;
 
 	constructor(
 		public resource: URI,
@@ -170,11 +176,12 @@ export class ExplorerItem {
 	}
 
 	get root(): ExplorerItem {
-		if (!this._parent) {
-			return this;
+		let item: ExplorerItem = this;
+		while (item._parent) {
+			item = item._parent;
 		}
 
-		return this._parent.root;
+		return item;
 	}
 
 	@memoize get children(): Map<string, ExplorerItem> {
@@ -182,14 +189,32 @@ export class ExplorerItem {
 	}
 
 	private updateName(value: string): void {
-		// Re-add to parent since the parent has a name map to children and the name might have changed
+		// Re-add to parent since the parent has a name map to children and the name might have changed.
+		// Callers update the resource themselves.
 		this._parent?.removeChild(this);
 		this._name = value;
-		this._parent?.addChild(this);
+		this._parent?.doAddChild(this, false);
 	}
 
 	getId(): string {
-		return this.root.resource.toString() + '::' + this.resource.toString();
+		// The tree asks for ids many times per item and render, so reuse the id while its
+		// inputs are unchanged. URIs are immutable, so it is enough to compare them by reference.
+		const rootResource = this.root.resource;
+		const markedAsFiltered = this.isMarkedAsFiltered();
+		if (this._id === undefined || this._idResource !== this.resource || this._idRootResource !== rootResource || this._idMarkedAsFiltered !== markedAsFiltered) {
+			let id = rootResource.toString() + '::' + this.resource.toString();
+
+			if (markedAsFiltered) {
+				id += '::findFilterResult';
+			}
+
+			this._id = id;
+			this._idResource = this.resource;
+			this._idRootResource = rootResource;
+			this._idMarkedAsFiltered = markedAsFiltered;
+		}
+
+		return this._id;
 	}
 
 	toString(): string {
@@ -217,7 +242,8 @@ export class ExplorerItem {
 			if (raw.children) {
 				for (let i = 0, len = raw.children.length; i < len; i++) {
 					const child = ExplorerItem.create(fileService, configService, filesConfigService, raw.children[i], stat, resolveTo);
-					stat.addChild(child);
+					// The file service already resolves child resources from the folder resource
+					stat.doAddChild(child, false);
 				}
 			}
 		}
@@ -264,19 +290,19 @@ export class ExplorerItem {
 			// Clear current children
 			local.children.clear();
 
-			// Merge received children
+			// Merge received children. Their resources are already resolved from the disk resource, which local now uses.
 			disk.children.forEach(diskChild => {
 				const formerLocalChild = oldLocalChildren.get(diskChild.resource);
 				// Existing child: merge
 				if (formerLocalChild) {
 					ExplorerItem.mergeLocalWithDisk(diskChild, formerLocalChild);
-					local.addChild(formerLocalChild);
+					local.doAddChild(formerLocalChild, formerLocalChild.resource !== diskChild.resource);
 					oldLocalChildren.delete(diskChild.resource);
 				}
 
 				// New child: add
 				else {
-					local.addChild(diskChild);
+					local.doAddChild(diskChild, false);
 				}
 			});
 
@@ -292,9 +318,20 @@ export class ExplorerItem {
 	 * Adds a child element to this folder.
 	 */
 	addChild(child: ExplorerItem): void {
+		this.doAddChild(child, true);
+	}
+
+	/**
+	 * Adds a child element to this folder.
+	 * @param updateResource Whether to derive the resource of the child from this folder. Resolving a
+	 * resource is expensive for large folders, so only skip it when the resource is known to be up to date.
+	 */
+	private doAddChild(child: ExplorerItem, updateResource: boolean): void {
 		// Inherit some parent properties to child
 		child._parent = this;
-		child.updateResource(false);
+		if (updateResource) {
+			child.updateResource(false);
+		}
 		this.children.set(this.getPlatformAwareName(child.name), child);
 	}
 
@@ -349,7 +386,7 @@ export class ExplorerItem {
 					if (nestedItems !== undefined) {
 						fileEntryItem.nestedChildren = [];
 						for (const name of nestedItems.keys()) {
-							const child = assertIsDefined(this.children.get(name));
+							const child = assertReturnsDefined(this.children.get(name));
 							fileEntryItem.nestedChildren.push(child);
 							child.nestedParent = fileEntryItem;
 						}
@@ -492,6 +529,22 @@ export class ExplorerItem {
 		}
 
 		return null;
+	}
+
+	// Find
+	private markedAsFindResult = false;
+	isMarkedAsFiltered(): boolean {
+		return this.markedAsFindResult;
+	}
+
+	markItemAndParentsAsFiltered(): void {
+		this.markedAsFindResult = true;
+		this.parent?.markItemAndParentsAsFiltered();
+	}
+
+	unmarkItemAndChildren(): void {
+		this.markedAsFindResult = false;
+		this.children.forEach(child => child.unmarkItemAndChildren());
 	}
 }
 

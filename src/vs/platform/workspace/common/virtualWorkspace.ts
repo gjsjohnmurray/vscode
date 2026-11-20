@@ -3,9 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Schemas } from 'vs/base/common/network';
-import { URI } from 'vs/base/common/uri';
-import { IWorkspace } from 'vs/platform/workspace/common/workspace';
+import { Schemas } from '../../../base/common/network.js';
+import { URI } from '../../../base/common/uri.js';
+import { IWorkspace } from './workspace.js';
 
 export function isVirtualResource(resource: URI) {
 	return resource.scheme !== Schemas.file && resource.scheme !== Schemas.vscodeRemote;
@@ -30,4 +30,11 @@ export function getVirtualWorkspaceAuthority(workspace: IWorkspace): string | un
 
 export function isVirtualWorkspace(workspace: IWorkspace): boolean {
 	return getVirtualWorkspaceLocation(workspace) !== undefined;
+}
+
+/** Whether the workspace has any virtual folders, or a virtual configuration when it has no folders. */
+export function hasVirtualWorkspaceContent(workspace: IWorkspace): boolean {
+	return workspace.folders.length > 0
+		? workspace.folders.some(folder => isVirtualResource(folder.uri))
+		: isVirtualWorkspace(workspace);
 }

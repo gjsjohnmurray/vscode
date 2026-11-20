@@ -3,24 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import { DisposableStore } from 'vs/base/common/lifecycle';
-import { ensureNoDisposablesAreLeakedInTestSuite } from 'vs/base/test/common/utils';
-import { InMemoryStorageService } from 'vs/platform/storage/common/storage';
-import { TestExplorerFilterState, TestFilterTerm } from 'vs/workbench/contrib/testing/common/testExplorerFilterState';
+import assert from 'assert';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { InMemoryStorageService } from '../../../../../platform/storage/common/storage.js';
+import { TestExplorerFilterState, TestFilterTerm } from '../../common/testExplorerFilterState.js';
 
 suite('TestExplorerFilterState', () => {
 	let t: TestExplorerFilterState;
-	let ds: DisposableStore;
-
-	teardown(() => {
-		ds.dispose();
-	});
-
-	ensureNoDisposablesAreLeakedInTestSuite();
+	const ds = ensureNoDisposablesAreLeakedInTestSuite();
 
 	setup(() => {
-		ds = new DisposableStore();
 		t = ds.add(new TestExplorerFilterState(ds.add(new InMemoryStorageService())));
 	});
 
@@ -87,5 +79,32 @@ suite('TestExplorerFilterState', () => {
 		assert.deepStrictEqual(t.globList, [{ text: 'foo', include: true }]);
 		assert.deepStrictEqual([...t.includeTags], ['hello\0world"1']);
 		assert.deepStrictEqual(t.excludeTags, new Set());
+	});
+
+	test('treats unrecognized @-prefixed text as regular filter text', () => {
+		t.setText('@smoke');
+		assert.deepStrictEqual(t.globList, [{ text: '@smoke', include: true }]);
+		assert.deepStrictEqual(t.includeTags, new Set());
+		assert.deepStrictEqual(t.excludeTags, new Set());
+		assertFilteringFor(termFiltersOff);
+	});
+
+	test('treats unrecognized @-prefixed text as filter text in mixed input', () => {
+		t.setText('@smoke @doc hello');
+		assert.deepStrictEqual(t.globList, [{ text: '@smoke hello', include: true }]);
+		assert.deepStrictEqual(t.includeTags, new Set());
+		assert.deepStrictEqual(t.excludeTags, new Set());
+		assertFilteringFor({
+			...termFiltersOff,
+			[TestFilterTerm.CurrentDoc]: true,
+		});
+	});
+
+	test('negated unrecognized @-prefixed text works as exclusion filter', () => {
+		t.setText('!@smoke');
+		assert.deepStrictEqual(t.globList, [{ text: '@smoke', include: false }]);
+		assert.deepStrictEqual(t.includeTags, new Set());
+		assert.deepStrictEqual(t.excludeTags, new Set());
+		assertFilteringFor(termFiltersOff);
 	});
 });

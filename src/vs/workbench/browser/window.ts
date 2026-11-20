@@ -3,53 +3,139 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { isSafari, setFullscreen } from 'vs/base/browser/browser';
-import { addDisposableListener, addDisposableThrottledListener, detectFullscreen, EventHelper, EventType, getWindows, getWindowsCount, windowOpenNoOpener, windowOpenPopup, windowOpenWithSuccess } from 'vs/base/browser/dom';
-import { DomEmitter } from 'vs/base/browser/event';
-import { HidDeviceData, requestHidDevice, requestSerialPort, requestUsbDevice, SerialPortData, UsbDeviceData } from 'vs/base/browser/deviceAccess';
-import { timeout } from 'vs/base/common/async';
-import { Event } from 'vs/base/common/event';
-import { Disposable, IDisposable, dispose, toDisposable } from 'vs/base/common/lifecycle';
-import { Schemas } from 'vs/base/common/network';
-import { isIOS, isMacintosh } from 'vs/base/common/platform';
-import Severity from 'vs/base/common/severity';
-import { URI } from 'vs/base/common/uri';
-import { localize } from 'vs/nls';
-import { CommandsRegistry } from 'vs/platform/commands/common/commands';
-import { IDialogService, IPromptButton } from 'vs/platform/dialogs/common/dialogs';
-import { IInstantiationService, ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
-import { ILabelService } from 'vs/platform/label/common/label';
-import { IOpenerService, matchesScheme } from 'vs/platform/opener/common/opener';
-import { IProductService } from 'vs/platform/product/common/productService';
-import { IBrowserWorkbenchEnvironmentService } from 'vs/workbench/services/environment/browser/environmentService';
-import { IWorkbenchLayoutService } from 'vs/workbench/services/layout/browser/layoutService';
-import { BrowserLifecycleService } from 'vs/workbench/services/lifecycle/browser/lifecycleService';
-import { ILifecycleService } from 'vs/workbench/services/lifecycle/common/lifecycle';
-import { IHostService } from 'vs/workbench/services/host/browser/host';
-import { registerWindowDriver } from 'vs/workbench/services/driver/browser/driver';
-import { CodeWindow, isAuxiliaryWindow, mainWindow } from 'vs/base/browser/window';
-import { createSingleCallFunction } from 'vs/base/common/functional';
+import { getZoomFactor, isSafari, isMobileStandalone, onDidChangeZoomLevel, setFullscreen } from '../../base/browser/browser.js';
+import { addDisposableListener, EventHelper, EventType, getWindow, getWindowById, getWindows, getWindowsCount, hasAppFocus, windowOpenNoOpener, windowOpenPopup, windowOpenWithSuccess } from '../../base/browser/dom.js';
+import { DomEmitter } from '../../base/browser/event.js';
+import { IPixelRatioMonitor, PixelRatio } from '../../base/browser/pixelRatio.js';
+import { HidDeviceData, requestHidDevice, requestSerialPort, requestUsbDevice, SerialPortData, UsbDeviceData } from '../../base/browser/deviceAccess.js';
+import { timeout } from '../../base/common/async.js';
+import { Event } from '../../base/common/event.js';
+import { Disposable, IDisposable, dispose, toDisposable } from '../../base/common/lifecycle.js';
+import { matchesScheme, Schemas } from '../../base/common/network.js';
+import { isIOS, isMacintosh } from '../../base/common/platform.js';
+import Severity from '../../base/common/severity.js';
+import { URI } from '../../base/common/uri.js';
+import { localize } from '../../nls.js';
+import { CommandsRegistry } from '../../platform/commands/common/commands.js';
+import { IDialogService, IPromptButton } from '../../platform/dialogs/common/dialogs.js';
+import { IInstantiationService, ServicesAccessor } from '../../platform/instantiation/common/instantiation.js';
+import { ILabelService } from '../../platform/label/common/label.js';
+import { IOpenerService } from '../../platform/opener/common/opener.js';
+import { IProductService } from '../../platform/product/common/productService.js';
+import { IBrowserWorkbenchEnvironmentService } from '../services/environment/browser/environmentService.js';
+import { IWorkbenchLayoutService } from '../services/layout/browser/layoutService.js';
+import { BrowserLifecycleService } from '../services/lifecycle/browser/lifecycleService.js';
+import { ILifecycleService, ShutdownReason } from '../services/lifecycle/common/lifecycle.js';
+import { IHostService } from '../services/host/browser/host.js';
+import { registerWindowDriver } from '../services/driver/browser/driver.js';
+import { CodeWindow, isAuxiliaryWindow, mainWindow } from '../../base/browser/window.js';
+import { createSingleCallFunction } from '../../base/common/functional.js';
+import { IConfigurationService } from '../../platform/configuration/common/configuration.js';
+import { IWorkbenchEnvironmentService } from '../services/environment/common/environmentService.js';
+import { MarkdownString } from '../../base/common/htmlContent.js';
+import { IContextMenuService } from '../../platform/contextview/browser/contextView.js';
 
 export abstract class BaseWindow extends Disposable {
 
 	private static TIMEOUT_HANDLES = Number.MIN_SAFE_INTEGER; // try to not compete with the IDs of native `setTimeout`
 	private static readonly TIMEOUT_DISPOSABLES = new Map<number, Set<IDisposable>>();
 
-	constructor(targetWindow: CodeWindow, dom = { getWindowsCount, getWindows } /* for testing */) {
+	constructor(
+		targetWindow: CodeWindow,
+		dom = {
+			getWindowsCount,
+			getWindows,
+			getPixelRatioMonitor: (targetWindow: CodeWindow) => PixelRatio.getInstance(targetWindow)
+		}, /* for testing */
+		@IHostService protected readonly hostService: IHostService,
+		@IWorkbenchEnvironmentService protected readonly environmentService: IWorkbenchEnvironmentService,
+		@IContextMenuService protected readonly contextMenuService: IContextMenuService,
+		@IWorkbenchLayoutService protected readonly layoutService: IWorkbenchLayoutService,
+	) {
 		super();
 
+		this.enableWindowFocusOnElementFocus(targetWindow);
 		this.enableMultiWindowAwareTimeout(targetWindow, dom);
+
+		this.registerFullScreenListeners(targetWindow.vscodeWindowId);
+		this.registerContextMenuListeners(targetWindow);
+		this.registerWindowScaleFactors(targetWindow, dom.getPixelRatioMonitor(targetWindow));
 	}
+
+	private registerWindowScaleFactors(targetWindow: CodeWindow, pixelRatio: IPixelRatioMonitor): void {
+		// Auxiliary windows mirror document/body styles, but keep their own workbench styles.
+		const container = this.layoutService.getContainer(targetWindow);
+		const update = () => {
+			container.style.setProperty('--window-zoom-factor', String(getZoomFactor(targetWindow)));
+			container.style.setProperty('--window-device-pixel-ratio', String(pixelRatio.value));
+		};
+		update();
+		this._register(onDidChangeZoomLevel(windowId => {
+			if (windowId === targetWindow.vscodeWindowId) {
+				update();
+			}
+		}));
+		this._register(pixelRatio.onDidChange(update));
+	}
+
+	//#region focus handling in multi-window applications
+
+	protected enableWindowFocusOnElementFocus(targetWindow: CodeWindow): void {
+		const originalFocus = targetWindow.HTMLElement.prototype.focus;
+
+		const that = this;
+		targetWindow.HTMLElement.prototype.focus = function (this: HTMLElement, options?: FocusOptions | undefined): void {
+
+			// Ensure the window the element belongs to is focused
+			// in scenarios where auxiliary windows are present
+			that.onElementFocus(getWindow(this));
+
+			// Pass to original focus() method
+			originalFocus.apply(this, [options]);
+		};
+	}
+
+	private onElementFocus(targetWindow: CodeWindow): void {
+
+		// Check if focus should transfer: the application currently has focus somewhere, but not in the target window.
+		if (!targetWindow.document.hasFocus() && hasAppFocus()) {
+
+			// Call original focus()
+			targetWindow.focus();
+
+			// In Electron, `window.focus()` fails to bring the window
+			// to the front if multiple windows exist in the same process
+			// group (floating windows). As such, we ask the host service
+			// to focus the window which can take care of bringin the
+			// window to the front.
+			//
+			// To minimise disruption by bringing windows to the front
+			// by accident, we only do this if the window is not already
+			// focused and the active window is not the target window
+			// but has focus. This is an indication that multiple windows
+			// are opened in the same process group while the target window
+			// is not focused.
+
+			if (
+				!this.environmentService.extensionTestsLocationURI &&
+				!targetWindow.document.hasFocus()
+			) {
+				this.hostService.focus(targetWindow);
+			}
+		}
+	}
+
+	//#endregion
 
 	//#region timeout handling in multi-window applications
 
-	/**
-	 * Override `setTimeout` and `clearTimeout` on the provided window to make
-	 * sure timeouts are dispatched to all opened windows. Some browsers may decide
-	 * to throttle timeouts in minimized windows, so with this we can ensure the
-	 * timeout is scheduled without being throttled (unless all windows are minimized).
-	 */
-	private enableMultiWindowAwareTimeout(targetWindow: Window, dom = { getWindowsCount, getWindows }): void {
+	protected enableMultiWindowAwareTimeout(targetWindow: Window, dom = { getWindowsCount, getWindows }): void {
+
+		// Override `setTimeout` and `clearTimeout` on the provided window to make
+		// sure timeouts are dispatched to all opened windows. Some browsers may decide
+		// to throttle timeouts in minimized windows, so with this we can ensure the
+		// timeout is scheduled without being throttled (unless all windows are minimized).
+
 		const originalSetTimeout = targetWindow.setTimeout;
 		Object.defineProperty(targetWindow, 'vscodeOriginalSetTimeout', { get: () => originalSetTimeout });
 
@@ -75,11 +161,23 @@ export abstract class BaseWindow extends Disposable {
 					continue; // skip over hidden windows (but never over main window)
 				}
 
-				const handle = (window as any).vscodeOriginalSetTimeout.apply(this, [handlerFn, timeout, ...args]);
+				// we track didClear in case the browser does not properly clear the timeout
+				// this can happen for timeouts on unfocused windows
+				let didClear = false;
+
+				const handle = (window as { vscodeOriginalSetTimeout?: typeof window.setTimeout }).vscodeOriginalSetTimeout?.apply(this, [(...args: unknown[]) => {
+					if (didClear) {
+						return;
+					}
+					handlerFn(...args);
+				}, timeout, ...args]);
 
 				const timeoutDisposable = toDisposable(() => {
-					(window as any).vscodeOriginalClearTimeout(handle);
+					didClear = true;
+					(window as { vscodeOriginalClearTimeout?: typeof window.clearTimeout }).vscodeOriginalClearTimeout?.apply(this, [handle]);
 					timeoutDisposables.delete(timeoutDisposable);
+					// Remove from the window's DisposableStore without re-disposing (we're already inside dispose)
+					disposables.deleteAndLeak(timeoutDisposable);
 				});
 
 				disposables.add(timeoutDisposable);
@@ -102,6 +200,59 @@ export abstract class BaseWindow extends Disposable {
 
 	//#endregion
 
+	//#region Confirm on Shutdown
+
+	static async confirmOnShutdown(accessor: ServicesAccessor, reason: ShutdownReason): Promise<boolean> {
+		const dialogService = accessor.get(IDialogService);
+		const configurationService = accessor.get(IConfigurationService);
+
+		const message = reason === ShutdownReason.QUIT ?
+			(isMacintosh ? localize('quitMessageMac', "Are you sure you want to quit?") : localize('quitMessage', "Are you sure you want to exit?")) :
+			localize('closeWindowMessage', "Are you sure you want to close the window?");
+		const primaryButton = reason === ShutdownReason.QUIT ?
+			(isMacintosh ? localize({ key: 'quitButtonLabel', comment: ['&& denotes a mnemonic'] }, "&&Quit") : localize({ key: 'exitButtonLabel', comment: ['&& denotes a mnemonic'] }, "&&Exit")) :
+			localize({ key: 'closeWindowButtonLabel', comment: ['&& denotes a mnemonic'] }, "&&Close Window");
+
+		const res = await dialogService.confirm({
+			message,
+			primaryButton,
+			checkbox: {
+				label: localize('doNotAskAgain', "Do not ask me again")
+			}
+		});
+
+		// Update setting if checkbox checked
+		if (res.confirmed && res.checkboxChecked) {
+			await configurationService.updateValue('window.confirmBeforeClose', 'never');
+		}
+
+		return res.confirmed;
+	}
+
+	//#endregion
+
+	private registerFullScreenListeners(targetWindowId: number): void {
+		this._register(this.hostService.onDidChangeFullScreen(({ windowId, fullscreen }) => {
+			if (windowId === targetWindowId) {
+				const targetWindow = getWindowById(targetWindowId);
+				if (targetWindow) {
+					setFullscreen(fullscreen, targetWindow.window);
+				}
+			}
+		}));
+	}
+
+	private registerContextMenuListeners(targetWindow: Window): void {
+		if (targetWindow !== mainWindow) {
+			// we only need to listen in the main window as the code
+			// will go by the active container and update accordingly
+			return;
+		}
+
+		const update = (visible: boolean) => this.layoutService.activeContainer.classList.toggle('context-menu-visible', visible);
+		this._register(this.contextMenuService.onDidShowContextMenu(() => update(true)));
+		this._register(this.contextMenuService.onDidHideContextMenu(() => update(false)));
+	}
 }
 
 export class BrowserWindow extends BaseWindow {
@@ -112,12 +263,13 @@ export class BrowserWindow extends BaseWindow {
 		@IDialogService private readonly dialogService: IDialogService,
 		@ILabelService private readonly labelService: ILabelService,
 		@IProductService private readonly productService: IProductService,
-		@IBrowserWorkbenchEnvironmentService private readonly environmentService: IBrowserWorkbenchEnvironmentService,
-		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
+		@IBrowserWorkbenchEnvironmentService private readonly browserEnvironmentService: IBrowserWorkbenchEnvironmentService,
+		@IWorkbenchLayoutService layoutService: IWorkbenchLayoutService,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
-		@IHostService private readonly hostService: IHostService
+		@IHostService hostService: IHostService,
+		@IContextMenuService contextMenuService: IContextMenuService,
 	) {
-		super(mainWindow);
+		super(mainWindow, undefined, hostService, browserEnvironmentService, contextMenuService, layoutService);
 
 		this.registerListeners();
 		this.create();
@@ -147,16 +299,6 @@ export class BrowserWindow extends BaseWindow {
 
 		// Prevent default navigation on drop
 		this._register(addDisposableListener(this.layoutService.mainContainer, EventType.DROP, e => EventHelper.stop(e, true)));
-
-		// Fullscreen (Browser)
-		for (const event of [EventType.FULLSCREEN_CHANGE, EventType.WK_FULLSCREEN_CHANGE]) {
-			this._register(addDisposableListener(mainWindow.document, event, () => setFullscreen(!!detectFullscreen(mainWindow))));
-		}
-
-		// Fullscreen (Native)
-		this._register(addDisposableThrottledListener(viewport, EventType.RESIZE, () => {
-			setFullscreen(!!detectFullscreen(mainWindow));
-		}, undefined, isMacintosh ? 2000 /* adjust for macOS animation */ : 800 /* can be throttled */));
 	}
 
 	private onWillShutdown(): void {
@@ -224,8 +366,8 @@ export class BrowserWindow extends BaseWindow {
 		this.openerService.setDefaultExternalOpener({
 			openExternal: async (href: string) => {
 				let isAllowedOpener = false;
-				if (this.environmentService.options?.openerAllowedExternalUrlPrefixes) {
-					for (const trustedPopupPrefix of this.environmentService.options.openerAllowedExternalUrlPrefixes) {
+				if (this.browserEnvironmentService.options?.openerAllowedExternalUrlPrefixes) {
+					for (const trustedPopupPrefix of this.browserEnvironmentService.options.openerAllowedExternalUrlPrefixes) {
 						if (href.startsWith(trustedPopupPrefix)) {
 							isAllowedOpener = true;
 							break;
@@ -235,30 +377,32 @@ export class BrowserWindow extends BaseWindow {
 
 				// HTTP(s): open in new window and deal with potential popup blockers
 				if (matchesScheme(href, Schemas.http) || matchesScheme(href, Schemas.https)) {
-					if (isSafari) {
+					// Both block popups opened outside a user gesture, so use the
+					// open-then-navigate path, which can pick up a reserved window.
+					if (isSafari || isMobileStandalone()) {
 						const opened = windowOpenWithSuccess(href, !isAllowedOpener);
 						if (!opened) {
 							await this.dialogService.prompt({
 								type: Severity.Warning,
-								message: localize('unableToOpenExternal', "The browser interrupted the opening of a new tab or window. Press 'Open' to open it anyway."),
-								detail: href,
+								message: localize('unableToOpenExternal', "The browser blocked opening a new tab or window. Press 'Retry' to try again."),
+								custom: {
+									markdownDetails: [{ markdown: new MarkdownString(localize('unableToOpenWindowDetail', "Please allow pop-ups for this website in your [browser settings]({0}).", 'https://aka.ms/allow-vscode-popup'), true) }]
+								},
 								buttons: [
 									{
-										label: localize({ key: 'open', comment: ['&& denotes a mnemonic'] }, "&&Open"),
+										label: localize({ key: 'retry', comment: ['&& denotes a mnemonic'] }, "&&Retry"),
 										run: () => isAllowedOpener ? windowOpenPopup(href) : windowOpenNoOpener(href)
-									},
-									{
-										label: localize({ key: 'learnMore', comment: ['&& denotes a mnemonic'] }, "&&Learn More"),
-										run: () => this.openerService.open(URI.parse('https://aka.ms/allow-vscode-popup'))
 									}
 								],
 								cancelButton: true
 							});
 						}
 					} else {
-						isAllowedOpener
-							? windowOpenPopup(href)
-							: windowOpenNoOpener(href);
+						if (isAllowedOpener) {
+							windowOpenPopup(href);
+						} else {
+							windowOpenNoOpener(href);
+						}
 					}
 				}
 

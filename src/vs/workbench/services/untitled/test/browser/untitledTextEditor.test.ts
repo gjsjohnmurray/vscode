@@ -3,28 +3,36 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import { URI } from 'vs/base/common/uri';
-import { join } from 'vs/base/common/path';
-import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
-import { IUntitledTextEditorService, UntitledTextEditorService } from 'vs/workbench/services/untitled/common/untitledTextEditorService';
-import { workbenchInstantiationService, TestServiceAccessor } from 'vs/workbench/test/browser/workbenchTestServices';
-import { snapshotToString } from 'vs/workbench/services/textfile/common/textfiles';
-import { PLAINTEXT_LANGUAGE_ID } from 'vs/editor/common/languages/modesRegistry';
-import { ISingleEditOperation } from 'vs/editor/common/core/editOperation';
-import { Range } from 'vs/editor/common/core/range';
-import { UntitledTextEditorInput } from 'vs/workbench/services/untitled/common/untitledTextEditorInput';
-import { IUntitledTextEditorModel, UntitledTextEditorModel } from 'vs/workbench/services/untitled/common/untitledTextEditorModel';
-import { CancellationToken } from 'vs/base/common/cancellation';
-import { EditorInputCapabilities } from 'vs/workbench/common/editor';
-import { DisposableStore } from 'vs/base/common/lifecycle';
-import { isReadable, isReadableStream } from 'vs/base/common/stream';
-import { readableToBuffer, streamToBuffer, VSBufferReadable, VSBufferReadableStream } from 'vs/base/common/buffer';
-import { LanguageDetectionLanguageEventSource } from 'vs/workbench/services/languageDetection/common/languageDetectionWorkerService';
-import { ensureNoDisposablesAreLeakedInTestSuite } from 'vs/base/test/common/utils';
-import { timeout } from 'vs/base/common/async';
+import assert from 'assert';
+import sinon from 'sinon';
+import { URI } from '../../../../../base/common/uri.js';
+import { join } from '../../../../../base/common/path.js';
+import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
+import { IUntitledTextEditorService, UntitledTextEditorService } from '../../common/untitledTextEditorService.js';
+import { workbenchInstantiationService, TestServiceAccessor, TestEditorInput } from '../../../../test/browser/workbenchTestServices.js';
+import { snapshotToString } from '../../../textfile/common/textfiles.js';
+import { PLAINTEXT_LANGUAGE_ID } from '../../../../../editor/common/languages/modesRegistry.js';
+import { ISingleEditOperation } from '../../../../../editor/common/core/editOperation.js';
+import { Range } from '../../../../../editor/common/core/range.js';
+import { UntitledTextEditorInput } from '../../common/untitledTextEditorInput.js';
+import { IUntitledTextEditorModel, UntitledTextEditorModel } from '../../common/untitledTextEditorModel.js';
+import { CancellationToken } from '../../../../../base/common/cancellation.js';
+import { EditorInputCapabilities } from '../../../../common/editor.js';
+import { DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { isReadable, isReadableStream } from '../../../../../base/common/stream.js';
+import { readableToBuffer, streamToBuffer, VSBufferReadable, VSBufferReadableStream } from '../../../../../base/common/buffer.js';
+import { LanguageDetectionLanguageEventSource } from '../../../languageDetection/common/languageDetectionWorkerService.js';
+import { Schemas } from '../../../../../base/common/network.js';
+import { UntitledTextEditorWorkingCopyEditorHandler } from '../../common/untitledTextEditorHandler.js';
+import { NO_TYPE_ID } from '../../../workingCopy/common/workingCopy.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { DeferredPromise, timeout } from '../../../../../base/common/async.js';
 
 suite('Untitled text editors', () => {
+
+	class TestUntitledTextEditorInput extends UntitledTextEditorInput {
+		getModel() { return this.model; }
+	}
 
 	const disposables = new DisposableStore();
 	let instantiationService: IInstantiationService;
@@ -37,6 +45,7 @@ suite('Untitled text editors', () => {
 	});
 
 	teardown(() => {
+		sinon.restore();
 		disposables.clear();
 	});
 
@@ -44,10 +53,18 @@ suite('Untitled text editors', () => {
 		const service = accessor.untitledTextEditorService;
 		const workingCopyService = accessor.workingCopyService;
 
-		const input1 = instantiationService.createInstance(UntitledTextEditorInput, service.create());
+		const events: IUntitledTextEditorModel[] = [];
+		disposables.add(service.onDidCreate(model => {
+			events.push(model);
+		}));
+
+		const input1 = instantiationService.createInstance(TestUntitledTextEditorInput, service.create());
 		await input1.resolve();
-		assert.strictEqual(service.get(input1.resource), input1.model);
+		assert.strictEqual(service.get(input1.resource), input1.getModel());
 		assert.ok(!accessor.untitledTextEditorService.isUntitledWithAssociatedResource(input1.resource));
+
+		assert.strictEqual(events.length, 1);
+		assert.strictEqual(events[0].resource.toString(), input1.getModel().resource.toString());
 
 		assert.ok(service.get(input1.resource));
 		assert.ok(!service.get(URI.file('testing')));
@@ -59,16 +76,16 @@ suite('Untitled text editors', () => {
 		assert.ok(!input1.hasCapability(EditorInputCapabilities.RequiresTrust));
 		assert.ok(!input1.hasCapability(EditorInputCapabilities.Scratchpad));
 
-		const input2 = instantiationService.createInstance(UntitledTextEditorInput, service.create());
-		assert.strictEqual(service.get(input2.resource), input2.model);
+		const input2 = instantiationService.createInstance(TestUntitledTextEditorInput, service.create());
+		assert.strictEqual(service.get(input2.resource), input2.getModel());
 
 		// toUntyped()
 		const untypedInput = input1.toUntyped({ preserveViewState: 0 });
 		assert.strictEqual(untypedInput.forceUntitled, true);
 
 		// get()
-		assert.strictEqual(service.get(input1.resource), input1.model);
-		assert.strictEqual(service.get(input2.resource), input2.model);
+		assert.strictEqual(service.get(input1.resource), input1.getModel());
+		assert.strictEqual(service.get(input2.resource), input2.getModel());
 
 		// revert()
 		await input1.revert(0);
@@ -79,6 +96,9 @@ suite('Untitled text editors', () => {
 		const model = await input2.resolve();
 		assert.strictEqual(await service.resolve({ untitledResource: input2.resource }), model);
 		assert.ok(service.get(model.resource));
+
+		assert.strictEqual(events.length, 2);
+		assert.strictEqual(events[1].resource.toString(), input2.resource.toString());
 
 		assert.ok(!input2.isDirty());
 
@@ -95,6 +115,10 @@ suite('Untitled text editors', () => {
 		const dirtyUntypedInput = input2.toUntyped({ preserveViewState: 0 });
 		assert.strictEqual(dirtyUntypedInput.contents, 'foo bar');
 		assert.strictEqual(dirtyUntypedInput.resource, undefined);
+
+		const dirtyUntypedInputWithResource = input2.toUntyped({ preserveViewState: 0, preserveResource: true });
+		assert.strictEqual(dirtyUntypedInputWithResource.contents, 'foo bar');
+		assert.strictEqual(dirtyUntypedInputWithResource?.resource?.toString(), input2.resource.toString());
 
 		const dirtyUntypedInputWithoutContent = input2.toUntyped();
 		assert.strictEqual(dirtyUntypedInputWithoutContent.resource?.toString(), input2.resource.toString());
@@ -214,10 +238,10 @@ suite('Untitled text editors', () => {
 		const service = accessor.untitledTextEditorService;
 		const workingCopyService = accessor.workingCopyService;
 
-		const untitled = disposables.add(instantiationService.createInstance(UntitledTextEditorInput, service.create({ initialValue: 'Hello World' })));
+		const untitled = disposables.add(instantiationService.createInstance(TestUntitledTextEditorInput, service.create({ initialValue: 'Hello World' })));
 		assert.ok(untitled.isDirty());
 
-		const backup = (await untitled.model.backup(CancellationToken.None)).content;
+		const backup = (await untitled.getModel().backup(CancellationToken.None)).content;
 		if (isReadableStream(backup)) {
 			const value = await streamToBuffer(backup as VSBufferReadableStream);
 			assert.strictEqual(value.toString(), 'Hello World');
@@ -232,6 +256,55 @@ suite('Untitled text editors', () => {
 		const model = disposables.add(await untitled.resolve());
 		assert.ok(model.isDirty());
 		assert.strictEqual(workingCopyService.dirtyCount, 1);
+	});
+
+	test('disposed models do not resolve', async () => {
+		const model = disposables.add(accessor.untitledTextEditorService.create({ initialValue: 'Discarded initial contents' }));
+		model.dispose();
+
+		await model.resolve();
+
+		assert.strictEqual(accessor.workingCopyBackupService.resolved.has(model), false);
+		assert.strictEqual(accessor.modelService.getModel(model.resource), null);
+		assert.strictEqual(accessor.untitledTextEditorService.get(model.resource), undefined);
+	});
+
+	test('disposing while resolving a backup does not create a text model', async () => {
+		const model = disposables.add(accessor.untitledTextEditorService.create({ initialValue: 'Discarded initial contents' }));
+		await accessor.workingCopyBackupService.backup(model, (await model.backup(CancellationToken.None)).content);
+		const resolving = model.resolve();
+		model.dispose();
+
+		await resolving;
+
+		assert.strictEqual(accessor.modelService.getModel(model.resource), null);
+		assert.strictEqual(accessor.untitledTextEditorService.get(model.resource), undefined);
+	});
+
+	test('disposing while decoding initial contents does not create a text model', async () => {
+		const model = disposables.add(accessor.untitledTextEditorService.create({ initialValue: 'Discarded initial contents' }));
+		const decoding = new DeferredPromise<void>();
+		const continueDecoding = new DeferredPromise<void>();
+		const getDecodedStream = accessor.textFileService.getDecodedStream.bind(accessor.textFileService);
+		const stub = sinon.stub(accessor.textFileService, 'getDecodedStream').callsFake(async (...args) => {
+			const stream = await getDecodedStream(...args);
+			await decoding.complete();
+			await continueDecoding.p;
+			return stream;
+		});
+		try {
+			const resolving = model.resolve();
+			await decoding.p;
+			model.dispose();
+			await continueDecoding.complete();
+			await resolving;
+
+			assert.strictEqual(accessor.modelService.getModel(model.resource), null);
+			assert.strictEqual(accessor.untitledTextEditorService.get(model.resource), undefined);
+		} finally {
+			await continueDecoding.complete();
+			stub.restore();
+		}
 	});
 
 	test('created with files.defaultLanguage setting', () => {
@@ -307,9 +380,9 @@ suite('Untitled text editors', () => {
 		const model = disposables.add(service.create());
 		const input = disposables.add(instantiationService.createInstance(UntitledTextEditorInput, model));
 
-		assert.ok(!input.model.hasLanguageSetExplicitly);
+		assert.ok(!input.hasLanguageSetExplicitly);
 		input.setLanguageId(PLAINTEXT_LANGUAGE_ID);
-		assert.ok(input.model.hasLanguageSetExplicitly);
+		assert.ok(input.hasLanguageSetExplicitly);
 
 		assert.strictEqual(input.getLanguageId(), PLAINTEXT_LANGUAGE_ID);
 	});
@@ -327,9 +400,9 @@ suite('Untitled text editors', () => {
 		const input = disposables.add(instantiationService.createInstance(UntitledTextEditorInput, model));
 		disposables.add(await input.resolve());
 
-		assert.ok(!input.model.hasLanguageSetExplicitly);
+		assert.ok(!input.hasLanguageSetExplicitly);
 		model.textEditorModel!.setLanguage(accessor.languageService.createById(language));
-		assert.ok(input.model.hasLanguageSetExplicitly);
+		assert.ok(input.hasLanguageSetExplicitly);
 
 		assert.strictEqual(model.getLanguageId(), language);
 	});
@@ -346,12 +419,12 @@ suite('Untitled text editors', () => {
 		const input = disposables.add(instantiationService.createInstance(UntitledTextEditorInput, model));
 		await input.resolve();
 
-		assert.ok(!input.model.hasLanguageSetExplicitly);
+		assert.ok(!input.hasLanguageSetExplicitly);
 		model.textEditorModel!.setLanguage(
 			accessor.languageService.createById(language),
 			// This is really what this is testing
 			LanguageDetectionLanguageEventSource);
-		assert.ok(!input.model.hasLanguageSetExplicitly);
+		assert.ok(!input.hasLanguageSetExplicitly);
 
 		assert.strictEqual(model.getLanguageId(), language);
 	});
@@ -599,6 +672,70 @@ suite('Untitled text editors', () => {
 
 		const canDispose2 = service.canDispose(model as UntitledTextEditorModel);
 		assert.strictEqual(canDispose2, true);
+	});
+
+	ensureNoDisposablesAreLeakedInTestSuite();
+});
+
+suite('UntitledTextEditorWorkingCopyEditorHandler', () => {
+
+	const disposables = new DisposableStore();
+	let instantiationService: IInstantiationService;
+	let handler: UntitledTextEditorWorkingCopyEditorHandler;
+
+	setup(() => {
+		instantiationService = workbenchInstantiationService(undefined, disposables);
+		const accessor = instantiationService.createInstance(TestServiceAccessor);
+		disposables.add(accessor.untitledTextEditorService as UntitledTextEditorService);
+		handler = disposables.add(instantiationService.createInstance(UntitledTextEditorWorkingCopyEditorHandler));
+	});
+
+	teardown(() => {
+		disposables.clear();
+	});
+
+	test('handles only untitled working copies with no type id', () => {
+		const untitledResource = URI.from({ scheme: Schemas.untitled, path: 'Untitled-1' });
+
+		assert.strictEqual(handler.handles({ resource: untitledResource, typeId: NO_TYPE_ID }), true);
+		assert.strictEqual(handler.handles({ resource: untitledResource, typeId: 'someTypeId' }), false);
+		assert.strictEqual(handler.handles({ resource: URI.file('/test.txt'), typeId: NO_TYPE_ID }), false);
+	});
+
+	test('isOpen matches UntitledTextEditorInput with same resource', () => {
+		const untitledResource = URI.from({ scheme: Schemas.untitled, path: 'Untitled-1' });
+		const workingCopy = { resource: untitledResource, typeId: NO_TYPE_ID };
+
+		const untitledInput = disposables.add(instantiationService.createInstance(UntitledTextEditorInput, instantiationService.createInstance(TestServiceAccessor).untitledTextEditorService.create({ untitledResource })));
+		assert.strictEqual(handler.isOpen(workingCopy, untitledInput), true);
+	});
+
+	test('isOpen matches non-UntitledTextEditorInput editors with same untitled resource', () => {
+		const untitledResource = URI.from({ scheme: Schemas.untitled, path: 'Untitled-1' });
+		const workingCopy = { resource: untitledResource, typeId: NO_TYPE_ID };
+
+		// A custom editor (or any other editor type) sharing the same untitled resource
+		// should be recognized as representing this working copy to prevent duplicate
+		// tabs on backup restoration.
+		const customEditorInput = disposables.add(new TestEditorInput(untitledResource, 'customEditorType'));
+		assert.strictEqual(handler.isOpen(workingCopy, customEditorInput), true);
+	});
+
+	test('isOpen does not match editors with different resource', () => {
+		const untitledResource1 = URI.from({ scheme: Schemas.untitled, path: 'Untitled-1' });
+		const untitledResource2 = URI.from({ scheme: Schemas.untitled, path: 'Untitled-2' });
+		const workingCopy = { resource: untitledResource1, typeId: NO_TYPE_ID };
+
+		const otherInput = disposables.add(new TestEditorInput(untitledResource2, 'customEditorType'));
+		assert.strictEqual(handler.isOpen(workingCopy, otherInput), false);
+	});
+
+	test('isOpen returns false for non-untitled working copies', () => {
+		const fileResource = URI.file('/test.txt');
+		const workingCopy = { resource: fileResource, typeId: NO_TYPE_ID };
+
+		const editor = disposables.add(new TestEditorInput(fileResource, 'testType'));
+		assert.strictEqual(handler.isOpen(workingCopy, editor), false);
 	});
 
 	ensureNoDisposablesAreLeakedInTestSuite();

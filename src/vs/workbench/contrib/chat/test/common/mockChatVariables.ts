@@ -3,34 +3,30 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { CancellationToken } from 'vs/base/common/cancellation';
-import { IDisposable } from 'vs/base/common/lifecycle';
-import { IChatModel } from 'vs/workbench/contrib/chat/common/chatModel';
-import { IParsedChatRequest } from 'vs/workbench/contrib/chat/common/chatParserTypes';
-import { IChatVariableData, IChatVariableResolveResult, IChatVariableResolver, IChatVariablesService, IDynamicReference } from 'vs/workbench/contrib/chat/common/chatVariables';
+import { ResourceMap } from '../../../../../base/common/map.js';
+import { URI } from '../../../../../base/common/uri.js';
+import { IChatVariablesService, IDynamicVariable } from '../../common/attachments/chatVariables.js';
+import { ToolAndToolSetEnablementMap } from '../../common/tools/languageModelToolsService.js';
 
 export class MockChatVariablesService implements IChatVariablesService {
 	_serviceBrand: undefined;
-	registerVariable(data: IChatVariableData, resolver: IChatVariableResolver): IDisposable {
-		throw new Error('Method not implemented.');
+
+	private _dynamicVariables = new ResourceMap<readonly IDynamicVariable[]>();
+	private _selectedToolAndToolSets = new ResourceMap<ToolAndToolSetEnablementMap>();
+
+	getDynamicVariables(sessionResource: URI): readonly IDynamicVariable[] {
+		return this._dynamicVariables.get(sessionResource) ?? [];
 	}
 
-	hasVariable(name: string): boolean {
-		throw new Error('Method not implemented.');
+	getSelectedToolAndToolSets(sessionResource: URI): ToolAndToolSetEnablementMap {
+		return this._selectedToolAndToolSets.get(sessionResource) ?? ToolAndToolSetEnablementMap.fromEntries([]);
 	}
 
-	getVariables(): Iterable<Readonly<IChatVariableData>> {
-		throw new Error('Method not implemented.');
+	setDynamicVariables(sessionResource: URI, variables: readonly IDynamicVariable[]): void {
+		this._dynamicVariables.set(sessionResource, variables);
 	}
 
-	getDynamicReferences(sessionId: string): readonly IDynamicReference[] {
-		return [];
-	}
-
-	async resolveVariables(prompt: IParsedChatRequest, model: IChatModel, token: CancellationToken): Promise<IChatVariableResolveResult> {
-		return {
-			prompt: prompt.text,
-			variables: {}
-		};
+	setSelectedToolAndToolSets(sessionResource: URI, tools: ToolAndToolSetEnablementMap): void {
+		this._selectedToolAndToolSets.set(sessionResource, tools);
 	}
 }

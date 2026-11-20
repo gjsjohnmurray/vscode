@@ -3,9 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Event } from 'vs/base/common/event';
-import { RawContextKey } from 'vs/platform/contextkey/common/contextkey';
-import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
+import { Event } from '../../../base/common/event.js';
+import { RawContextKey } from '../../contextkey/common/contextkey.js';
+import { createDecorator } from '../../instantiation/common/instantiation.js';
 
 export const IAccessibilityService = createDecorator<IAccessibilityService>('accessibilityService');
 
@@ -14,13 +14,16 @@ export interface IAccessibilityService {
 
 	readonly onDidChangeScreenReaderOptimized: Event<void>;
 	readonly onDidChangeReducedMotion: Event<void>;
+	readonly onDidChangeReducedTransparency: Event<void>;
 
 	alwaysUnderlineAccessKeys(): Promise<boolean>;
 	isScreenReaderOptimized(): boolean;
 	isMotionReduced(): boolean;
+	isTransparencyReduced(): boolean;
 	getAccessibilitySupport(): AccessibilitySupport;
 	setAccessibilitySupport(accessibilitySupport: AccessibilitySupport): void;
 	alert(message: string): void;
+	status(message: string): void;
 }
 
 export const enum AccessibilitySupport {
@@ -41,25 +44,14 @@ export interface IAccessibilityInformation {
 	role?: string;
 }
 
-export function isAccessibilityInformation(obj: any): obj is IAccessibilityInformation {
-	return obj && typeof obj === 'object'
-		&& typeof obj.label === 'string'
-		&& (typeof obj.role === 'undefined' || typeof obj.role === 'string');
+export function isAccessibilityInformation(obj: unknown): obj is IAccessibilityInformation {
+	if (!obj || typeof obj !== 'object') {
+		return false;
+	}
+
+	const candidate = obj as Partial<IAccessibilityInformation>;
+	return typeof candidate.label === 'string'
+		&& (typeof candidate.role === 'undefined' || typeof candidate.role === 'string');
 }
 
-export const IAccessibleNotificationService = createDecorator<IAccessibleNotificationService>('accessibleNotificationService');
-/**
- * Manages whether an audio cue or an aria alert will be used
- * in response to actions taken around the workbench.
- * Targets screen reader and braille users.
- */
-export interface IAccessibleNotificationService {
-	readonly _serviceBrand: undefined;
-	notify(event: AccessibleNotificationEvent, userGesture?: boolean): void;
-}
-
-export const enum AccessibleNotificationEvent {
-	Clear = 'clear',
-	Save = 'save',
-	Format = 'format'
-}
+export const ACCESSIBLE_VIEW_SHOWN_STORAGE_PREFIX = 'ACCESSIBLE_VIEW_SHOWN_';

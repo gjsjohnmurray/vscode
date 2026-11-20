@@ -3,18 +3,20 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import { DecorationsService } from 'vs/workbench/services/decorations/browser/decorationsService';
-import { IDecorationsProvider, IDecorationData } from 'vs/workbench/services/decorations/common/decorations';
-import { URI } from 'vs/base/common/uri';
-import { Event, Emitter } from 'vs/base/common/event';
-import * as resources from 'vs/base/common/resources';
-import { CancellationToken } from 'vs/base/common/cancellation';
-import { mock } from 'vs/base/test/common/mock';
-import { IUriIdentityService } from 'vs/platform/uriIdentity/common/uriIdentity';
-import { TestThemeService } from 'vs/platform/theme/test/common/testThemeService';
-import { runWithFakedTimers } from 'vs/base/test/common/timeTravelScheduler';
-import { ensureNoDisposablesAreLeakedInTestSuite } from 'vs/base/test/common/utils';
+import assert from 'assert';
+import { DecorationsService } from '../../browser/decorationsService.js';
+import { IDecorationsProvider, IDecorationData } from '../../common/decorations.js';
+import { URI } from '../../../../../base/common/uri.js';
+import { Event, Emitter } from '../../../../../base/common/event.js';
+import * as resources from '../../../../../base/common/resources.js';
+import { CancellationToken } from '../../../../../base/common/cancellation.js';
+import { mock } from '../../../../../base/test/common/mock.js';
+import { IUriIdentityService } from '../../../../../platform/uriIdentity/common/uriIdentity.js';
+import { TestThemeService } from '../../../../../platform/theme/test/common/testThemeService.js';
+import { runWithFakedTimers } from '../../../../../base/test/common/timeTravelScheduler.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import * as DOM from '../../../../../base/browser/dom.js';
+import { Codicon } from '../../../../../base/common/codicons.js';
 
 suite('DecorationsService', function () {
 
@@ -94,6 +96,81 @@ suite('DecorationsService', function () {
 		assert.strictEqual(callCounter, 1);
 
 		reg.dispose();
+	});
+
+	test('Classifies text, icon, and bubbled badges', function () {
+		const textUri = URI.parse('file:///text.txt');
+		const iconUri = URI.parse('file:///icon.txt');
+		const parentUri = URI.parse('file:///folder/');
+		const childUri = URI.parse('file:///folder/child.txt');
+		const decorationData = new Map<string, IDecorationData>([
+			[textUri.toString(), { letter: 'M' }],
+			[iconUri.toString(), { letter: Codicon.lockSmall }],
+			[childUri.toString(), { letter: 'M', bubble: true }],
+		]);
+		const registration = service.registerDecorationsProvider({
+			label: 'Badge types',
+			onDidChange: Event.None,
+			provideDecorations: resource => decorationData.get(resource.toString()),
+		});
+		const problems = service.registerDecorationsProvider({
+			label: 'Problems',
+			onDidChange: Event.None,
+			provideDecorations: resource => resource.toString() === textUri.toString() ? { letter: '2', weight: 10 } : undefined,
+		});
+
+		const textDecoration = service.getDecoration(textUri, false)!;
+		const iconDecoration = service.getDecoration(iconUri, false)!;
+		service.getDecoration(childUri, false)?.dispose();
+		const bubbleDecoration = service.getDecoration(parentUri, true)!;
+
+		assert.deepStrictEqual(
+			[textDecoration, iconDecoration, bubbleDecoration].map(({ isTextBadge, badgeText }) => ({ isTextBadge, badgeText })),
+			[{ isTextBadge: true, badgeText: '2, M' }, { isTextBadge: false, badgeText: undefined }, { isTextBadge: false, badgeText: undefined }]
+		);
+
+		textDecoration.dispose();
+		iconDecoration.dispose();
+		bubbleDecoration.dispose();
+		registration.dispose();
+		problems.dispose();
+	});
+
+	test('Falls back to lower-weight decoration color when a theme color is undefined', function () {
+
+		const uri = URI.parse('foo:/folder/file');
+		const parentUri = URI.parse('foo:/folder/');
+		const highPriority = service.registerDecorationsProvider({
+			label: 'High priority',
+			onDidChange: Event.None,
+			provideDecorations: resource => resource.toString() === uri.toString() ? { color: 'highPriorityColor', weight: 10, letter: 'H', bubble: true } : undefined
+		});
+		const lowPriority = service.registerDecorationsProvider({
+			label: 'Low priority',
+			onDidChange: Event.None,
+			provideDecorations: resource => resource.toString() === uri.toString() ? { color: 'lowPriorityColor', weight: 5, letter: 'L', bubble: true } : undefined
+		});
+
+		const decoration = service.getDecoration(uri, false)!;
+		const bubbleDecoration = service.getDecoration(parentUri, true)!;
+		for (const [className, pseudoElement] of [
+			[decoration.labelClassName, undefined],
+			[decoration.badgeClassName, '::after'],
+			[bubbleDecoration.badgeClassName, '::after']
+		] as const) {
+			const element = document.createElement('div');
+			element.className = className;
+			element.style.setProperty('--vscode-lowPriorityColor', '#ff0000');
+			document.body.appendChild(element);
+
+			assert.strictEqual(DOM.getWindow(element).getComputedStyle(element, pseudoElement).color, 'rgb(255, 0, 0)');
+			element.remove();
+		}
+
+		decoration.dispose();
+		bubbleDecoration.dispose();
+		highPriority.dispose();
+		lowPriority.dispose();
 	});
 
 	test('Clear decorations on provider dispose', async function () {
@@ -182,7 +259,7 @@ suite('DecorationsService', function () {
 		const provider = new class implements IDecorationsProvider {
 
 			_onDidChange = new Emitter<URI[]>();
-			onDidChange: Event<readonly URI[]> = this._onDidChange.event;
+			readonly onDidChange: Event<readonly URI[]> = this._onDidChange.event;
 
 			label: string = 'foo';
 

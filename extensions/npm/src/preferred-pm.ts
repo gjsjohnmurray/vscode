@@ -3,10 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import findWorkspaceRoot = require('../node_modules/find-yarn-workspace-root');
-import * as findUp from 'find-up';
+import findWorkspaceRoot = require('find-yarn-workspace-root');
+import findUp from 'find-up';
 import * as path from 'path';
-import * as whichPM from 'which-pm';
+import whichPM from 'which-pm';
 import { Uri, workspace } from 'vscode';
 
 interface PreferredProperties {
@@ -25,6 +25,10 @@ async function pathExists(filePath: string) {
 
 async function isBunPreferred(pkgPath: string): Promise<PreferredProperties> {
 	if (await pathExists(path.join(pkgPath, 'bun.lockb'))) {
+		return { isPreferred: true, hasLockfile: true };
+	}
+
+	if (await pathExists(path.join(pkgPath, 'bun.lock'))) {
 		return { isPreferred: true, hasLockfile: true };
 	}
 

@@ -3,15 +3,14 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import { DisposableStore } from 'vs/base/common/lifecycle';
-import { ensureNoDisposablesAreLeakedInTestSuite } from 'vs/base/test/common/utils';
-import { StorageScope, IStorageService, StorageTarget } from 'vs/platform/storage/common/storage';
-import { Memento } from 'vs/workbench/common/memento';
-import { TestStorageService } from 'vs/workbench/test/common/workbenchTestServices';
+import assert from 'assert';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../base/test/common/utils.js';
+import { StorageScope, IStorageService, StorageTarget } from '../../../platform/storage/common/storage.js';
+import { Memento } from '../../common/memento.js';
+import { TestStorageService } from './workbenchTestServices.js';
 
 suite('Memento', () => {
-	const disposables = new DisposableStore();
+	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 	let storage: IStorageService;
 
 	setup(() => {
@@ -21,12 +20,8 @@ suite('Memento', () => {
 		Memento.clear(StorageScope.WORKSPACE);
 	});
 
-	teardown(() => {
-		disposables.clear();
-	});
-
 	test('Loading and Saving Memento with Scopes', () => {
-		const myMemento = new Memento('memento.test', storage);
+		const myMemento = new Memento<{ foo: number[] | string }>('memento.test', storage);
 
 		// Application
 		let memento = myMemento.getMemento(StorageScope.APPLICATION, StorageTarget.MACHINE);
@@ -101,7 +96,7 @@ suite('Memento', () => {
 	});
 
 	test('Save and Load', () => {
-		const myMemento = new Memento('memento.test', storage);
+		const myMemento = new Memento<{ foo: number[] | string }>('memento.test', storage);
 
 		// Profile
 		let memento = myMemento.getMemento(StorageScope.PROFILE, StorageTarget.MACHINE);
@@ -165,8 +160,8 @@ suite('Memento', () => {
 	});
 
 	test('Save and Load - 2 Components with same id', () => {
-		const myMemento = new Memento('memento.test', storage);
-		const myMemento2 = new Memento('memento.test', storage);
+		const myMemento = new Memento<any>('memento.test', storage);
+		const myMemento2 = new Memento<any>('memento.test', storage);
 
 		// Profile
 		let memento = myMemento.getMemento(StorageScope.PROFILE, StorageTarget.MACHINE);
@@ -207,7 +202,7 @@ suite('Memento', () => {
 	});
 
 	test('Clear Memento', () => {
-		let myMemento = new Memento('memento.test', storage);
+		let myMemento = new Memento<{ foo: string; bar: string }>('memento.test', storage);
 
 		// Profile
 		let profileMemento = myMemento.getMemento(StorageScope.PROFILE, StorageTarget.MACHINE);
@@ -232,5 +227,4 @@ suite('Memento', () => {
 		assert.deepStrictEqual(workspaceMemento, {});
 	});
 
-	ensureNoDisposablesAreLeakedInTestSuite();
 });

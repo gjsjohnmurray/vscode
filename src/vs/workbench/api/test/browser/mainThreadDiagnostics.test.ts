@@ -3,18 +3,18 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import { timeout } from 'vs/base/common/async';
-import { URI, UriComponents } from 'vs/base/common/uri';
-import { runWithFakedTimers } from 'vs/base/test/common/timeTravelScheduler';
-import { ensureNoDisposablesAreLeakedInTestSuite } from 'vs/base/test/common/utils';
-import { MarkerService } from 'vs/platform/markers/common/markerService';
-import { IMarkerData } from 'vs/platform/markers/common/markers';
-import { IUriIdentityService } from 'vs/platform/uriIdentity/common/uriIdentity';
-import { MainThreadDiagnostics } from 'vs/workbench/api/browser/mainThreadDiagnostics';
-import { IExtHostContext } from 'vs/workbench/services/extensions/common/extHostCustomers';
-import { ExtensionHostKind } from 'vs/workbench/services/extensions/common/extensionHostKind';
-import { mock } from 'vs/workbench/test/common/workbenchTestServices';
+import assert from 'assert';
+import { timeout } from '../../../../base/common/async.js';
+import { URI, UriComponents } from '../../../../base/common/uri.js';
+import { runWithFakedTimers } from '../../../../base/test/common/timeTravelScheduler.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
+import { MarkerService } from '../../../../platform/markers/common/markerService.js';
+import { IMarkerData } from '../../../../platform/markers/common/markers.js';
+import { IUriIdentityService } from '../../../../platform/uriIdentity/common/uriIdentity.js';
+import { MainThreadDiagnostics } from '../../browser/mainThreadDiagnostics.js';
+import { IExtHostContext } from '../../../services/extensions/common/extHostCustomers.js';
+import { ExtensionHostKind } from '../../../services/extensions/common/extensionHostKind.js';
+import { mock } from '../../../test/common/workbenchTestServices.js';
 
 
 suite('MainThreadDiagnostics', function () {
@@ -53,7 +53,8 @@ suite('MainThreadDiagnostics', function () {
 			}
 		);
 
-		diag.$changeMany('foo', [[URI.file('a'), [{
+		const resource = URI.file('a');
+		diag.$changeMany('foo', [[resource, [{
 			code: '666',
 			startLineNumber: 1,
 			startColumn: 1,
@@ -62,11 +63,23 @@ suite('MainThreadDiagnostics', function () {
 			message: 'fffff',
 			severity: 1,
 			source: 'me'
-		}]]]);
+		}], true]]);
 
-		assert.strictEqual(markerService.read().length, 1);
+		assert.deepStrictEqual({
+			markers: markerService.read().length,
+			diagnosticsTruncated: markerService.isSourceTruncated(resource)
+		}, {
+			markers: 1,
+			diagnosticsTruncated: true
+		});
 		diag.dispose();
-		assert.strictEqual(markerService.read().length, 0);
+		assert.deepStrictEqual({
+			markers: markerService.read().length,
+			diagnosticsTruncated: markerService.isSourceTruncated(resource)
+		}, {
+			markers: 0,
+			diagnosticsTruncated: false
+		});
 	});
 
 	test('OnDidChangeDiagnostics triggers twice on same diagnostics #136434', function () {

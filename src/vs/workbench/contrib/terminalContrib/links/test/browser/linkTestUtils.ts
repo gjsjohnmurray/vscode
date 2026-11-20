@@ -4,9 +4,13 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { deepStrictEqual } from 'assert';
-import { ITerminalLinkDetector, TerminalLinkType } from 'vs/workbench/contrib/terminalContrib/links/browser/links';
-import { URI } from 'vs/base/common/uri';
+import { ITerminalLinkDetector, TerminalLinkType } from '../../browser/links.js';
+import { URI } from '../../../../../../base/common/uri.js';
 import type { IBufferLine } from '@xterm/xterm';
+import { hasKey } from '../../../../../../base/common/types.js';
+import { upcastPartial } from '../../../../../../base/test/common/mock.js';
+import { IFileStatWithPartialMetadata } from '../../../../../../platform/files/common/files.js';
+import { FileService } from '../../../../../../platform/files/common/fileService.js';
 
 export async function assertLinkHelper(
 	text: string,
@@ -40,7 +44,7 @@ export async function assertLinkHelper(
 	const expectedLinks = expected.map(e => {
 		return {
 			type: expectedType,
-			link: 'uri' in e ? e.uri.toString() : e.text,
+			link: hasKey(e, { uri: true }) ? e.uri.toString() : e.text,
 			bufferRange: {
 				start: { x: e.range[0][0], y: e.range[0][1] },
 				end: { x: e.range[1][0], y: e.range[1][1] },
@@ -48,4 +52,17 @@ export async function assertLinkHelper(
 		};
 	});
 	deepStrictEqual(actualLinks, expectedLinks);
+}
+
+export class TestFileService extends FileService {
+	private _files: URI[] | '*' = '*';
+	override async stat(resource: URI): Promise<IFileStatWithPartialMetadata> {
+		if (this._files === '*' || this._files.some(e => e.toString() === resource.toString())) {
+			return upcastPartial<IFileStatWithPartialMetadata>({ isFile: true, isDirectory: false, isSymbolicLink: false });
+		}
+		throw new Error('ENOENT');
+	}
+	setFiles(files: URI[] | '*'): void {
+		this._files = files;
+	}
 }

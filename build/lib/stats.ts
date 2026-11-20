@@ -3,13 +3,21 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as es from 'event-stream';
-import * as fancyLog from 'fancy-log';
-import * as ansiColors from 'ansi-colors';
-import * as File from 'vinyl';
+import { through, type ThroughStream } from './streams.ts';
+import fancyLog from 'fancy-log';
+import ansiColors from 'ansi-colors';
+import File from 'vinyl';
 
 class Entry {
-	constructor(readonly name: string, public totalCount: number, public totalSize: number) { }
+	readonly name: string;
+	public totalCount: number;
+	public totalSize: number;
+
+	constructor(name: string, totalCount: number, totalSize: number) {
+		this.name = name;
+		this.totalCount = totalCount;
+		this.totalSize = totalSize;
+	}
 
 	toString(pretty?: boolean): string {
 		if (!pretty) {
@@ -35,12 +43,12 @@ class Entry {
 
 const _entries = new Map<string, Entry>();
 
-export function createStatsStream(group: string, log?: boolean): es.ThroughStream {
+export function createStatsStream(group: string, log?: boolean): ThroughStream {
 
 	const entry = new Entry(group, 0, 0);
 	_entries.set(entry.name, entry);
 
-	return es.through(function (data) {
+	return through(function (data) {
 		const file = data as File;
 		if (typeof file.path === 'string') {
 			entry.totalCount += 1;

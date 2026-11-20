@@ -10,18 +10,15 @@ use crate::{
 	trace,
 	util::{
 		errors::{
-			wrap, AnyError, CodeError, OAuthError, RefreshTokenNotAvailableError, StatusError,
-			WrappedError,
+			wrap, AnyError, OAuthError, RefreshTokenNotAvailableError, StatusError, WrappedError,
 		},
 		input::prompt_options,
 	},
 	warning,
 };
-use async_trait::async_trait;
-use chrono::{DateTime, Utc};
-use gethostname::gethostname;
+use jiff::{SignedDuration, Timestamp};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{cell::Cell, fmt::Display, path::PathBuf, sync::Arc, thread};
+use std::{cell::Cell, fmt::Display, future::Future, path::PathBuf, pin::Pin, sync::Arc};
 use tokio::time::sleep;
 use tunnels::{
 	contracts::PROD_FIRST_PARTY_APP_ID,
@@ -60,7 +57,7 @@ impl Display for AuthProvider {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
 			AuthProvider::Microsoft => write!(f, "Microsoft Account"),
-			AuthProvider::Github => write!(f, "Github Account"),
+			AuthProvider::Github => write!(f, "GitHub Account"),
 		}
 	}
 }
@@ -93,10 +90,9 @@ impl AuthProvider {
 
 	pub fn get_default_scopes(&self) -> String {
 		match self {
-			AuthProvider::Microsoft => format!(
-				"{}/.default+offline_access+profile+openid",
-				PROD_FIRST_PARTY_APP_ID
-			),
+			AuthProvider::Microsoft => {
+				format!("{PROD_FIRST_PARTY_APP_ID}/.default+offline_access+profile+openid")
+			}
 			AuthProvider::Github => "read:user+read:org".to_string(),
 		}
 	}
@@ -105,13 +101,13 @@ impl AuthProvider {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct StoredCredential {
 	#[serde(rename = "p")]
-	provider: AuthProvider,
+	pub(crate) provider: AuthProvider,
 	#[serde(rename = "a")]
 	access_token: String,
 	#[serde(rename = "r")]
 	refresh_token: Option<String>,
 	#[serde(rename = "e")]
-	expires_at: Option<DateTime<Utc>>,
+	expires_at: Option<Timestamp>,
 }
 
 const GH_USER_ENDPOINT: &str = "https://api.github.com/user";
@@ -122,18 +118,30 @@ async fn get_github_user(
 ) -> Result<reqwest::Response, reqwest::Error> {
 	client
 		.get(GH_USER_ENDPOINT)
-		.header("Authorization", format!("token {}", access_token))
+		.header("Authorization", format!("token {access_token}"))
 		.header("User-Agent", get_default_user_agent())
 		.send()
 		.await
 }
 
 impl StoredCredential {
+	/// Returns the raw access token string.
+	pub fn access_token(&self) -> &str {
+		&self.access_token
+	}
+
+	/// Returns the remaining lifetime in whole seconds, omitting unknown or non-positive lifetimes.
+	pub fn expires_in(&self, now: Timestamp) -> Option<i64> {
+		self.expires_at
+			.map(|expiry| expiry.duration_since(now).as_secs())
+			.filter(|seconds| *seconds > 0)
+	}
+
 	pub async fn is_expired(&self, log: &log::Logger, client: &reqwest::Client) -> bool {
 		match self.provider {
 			AuthProvider::Microsoft => self
 				.expires_at
-				.map(|e| Utc::now() + chrono::Duration::minutes(5) > e)
+				.map(|e| Timestamp::now() + SignedDuration::from_secs(5 * 60) > e)
 				.unwrap_or(false),
 
 			// Make an auth request to Github. Mark the credential as expired
@@ -144,7 +152,7 @@ impl StoredCredential {
 				let res = match res {
 					Ok(r) => r,
 					Err(e) => {
-						warning!(log, "failed to check Github token: {}", e);
+						warning!(log, "failed to check GitHub token: {}", e);
 						return false;
 					}
 				};
@@ -154,7 +162,7 @@ impl StoredCredential {
 				}
 
 				let err = StatusError::from_res(res).await;
-				debug!(log, "github token looks expired: {:?}", err);
+				debug!(log, "GitHub token looks expired: {:?}", err);
 				true
 			}
 		}
@@ -167,7 +175,7 @@ impl StoredCredential {
 			refresh_token: auth.refresh_token,
 			expires_at: auth
 				.expires_in
-				.map(|e| Utc::now() + chrono::Duration::seconds(e)),
+				.map(|e| Timestamp::now() + SignedDuration::from_secs(e)),
 		}
 	}
 }
@@ -184,6 +192,11 @@ pub struct Auth {
 	log: log::Logger,
 	file_storage_path: PathBuf,
 	storage: Arc<std::sync::Mutex<Option<StorageWithLastRead>>>,
+	/// Prefix for keyring entries, derived from the namespace.
+	keyring_prefix: String,
+	/// When set, restricts authentication to only this provider.
+	/// The user will not be prompted to choose a provider.
+	forced_provider: Option<AuthProvider>,
 }
 
 trait StorageImplementation: Send + Sync {
@@ -227,16 +240,27 @@ const CONTINUE_MARKER: &str = "<MORE>";
 
 /// Implementation that wraps the KeyringStorage on Linux to avoid
 /// https://github.com/hwchen/keyring-rs/issues/132
+#[cfg(target_os = "linux")]
 struct ThreadKeyringStorage {
 	s: Option<KeyringStorage>,
 }
 
+#[cfg(target_os = "linux")]
 impl ThreadKeyringStorage {
+	fn new(prefix: String) -> Self {
+		Self {
+			s: Some(KeyringStorage::new(prefix)),
+		}
+	}
+
 	fn thread_op<R, Fn>(&mut self, f: Fn) -> Result<R, AnyError>
 	where
 		Fn: 'static + Send + FnOnce(&mut KeyringStorage) -> Result<R, AnyError>,
 		R: 'static + Send,
 	{
+		use crate::util::errors::CodeError;
+		use std::thread;
+
 		let mut s = match self.s.take() {
 			Some(s) => s,
 			None => return Err(CodeError::KeyringTimeout.into()),
@@ -263,14 +287,7 @@ impl ThreadKeyringStorage {
 	}
 }
 
-impl Default for ThreadKeyringStorage {
-	fn default() -> Self {
-		Self {
-			s: Some(KeyringStorage::default()),
-		}
-	}
-}
-
+#[cfg(target_os = "linux")]
 impl StorageImplementation for ThreadKeyringStorage {
 	fn read(&mut self) -> Result<Option<StoredCredential>, AnyError> {
 		self.thread_op(|s| s.read())
@@ -285,11 +302,18 @@ impl StorageImplementation for ThreadKeyringStorage {
 	}
 }
 
-#[derive(Default)]
 struct KeyringStorage {
-	// keywring storage can be split into multiple entries due to entry length limits
-	// on Windows https://github.com/microsoft/vscode-cli/issues/358
+	prefix: String,
 	entries: Vec<keyring::Entry>,
+}
+
+impl KeyringStorage {
+	fn new(prefix: String) -> Self {
+		Self {
+			prefix,
+			entries: vec![],
+		}
+	}
 }
 
 macro_rules! get_next_entry {
@@ -297,7 +321,8 @@ macro_rules! get_next_entry {
 		match $self.entries.get($i) {
 			Some(e) => e,
 			None => {
-				let e = keyring::Entry::new("vscode-cli", &format!("vscode-cli-{}", $i)).unwrap();
+				let e = keyring::Entry::new(&$self.prefix, &format!("{}-{}", $self.prefix, $i))
+					.unwrap();
 				$self.entries.push(e);
 				$self.entries.last().unwrap()
 			}
@@ -383,12 +408,39 @@ impl StorageImplementation for FileStorage {
 
 impl Auth {
 	pub fn new(paths: &LauncherPaths, log: log::Logger) -> Auth {
+		Self::with_namespace(paths, log, None)
+	}
+
+	/// Creates an `Auth` instance with an isolated credential namespace.
+	/// Credentials are stored separately from the global CLI credentials,
+	/// so logging in here does not affect tunnel or other global auth.
+	pub fn with_namespace(
+		paths: &LauncherPaths,
+		log: log::Logger,
+		namespace: Option<String>,
+	) -> Auth {
+		let filename = match &namespace {
+			None => "token.json".to_string(),
+			Some(ns) => format!("token-{ns}.json"),
+		};
+		let keyring_prefix = match &namespace {
+			None => "vscode-cli".to_string(),
+			Some(ns) => format!("vscode-cli-{ns}"),
+		};
 		Auth {
 			log,
 			client: reqwest::Client::new(),
-			file_storage_path: paths.root().join("token.json"),
+			file_storage_path: paths.root().join(filename),
 			storage: Arc::new(std::sync::Mutex::new(None)),
+			keyring_prefix,
+			forced_provider: None,
 		}
+	}
+
+	/// Restricts this `Auth` instance to only allow the given provider.
+	/// When set, the user will not be prompted to choose a provider.
+	pub fn set_provider(&mut self, provider: AuthProvider) {
+		self.forced_provider = Some(provider);
 	}
 
 	fn with_storage<T, F>(&self, op: F) -> T
@@ -401,10 +453,13 @@ impl Auth {
 		}
 
 		#[cfg(not(target_os = "linux"))]
-		let mut keyring_storage = KeyringStorage::default();
+		let mut keyring_storage = KeyringStorage::new(self.keyring_prefix.clone());
 		#[cfg(target_os = "linux")]
-		let mut keyring_storage = ThreadKeyringStorage::default();
-		let mut file_storage = FileStorage(PersistedState::new(self.file_storage_path.clone()));
+		let mut keyring_storage = ThreadKeyringStorage::new(self.keyring_prefix.clone());
+		let mut file_storage = FileStorage(PersistedState::new_with_mode(
+			self.file_storage_path.clone(),
+			0o600,
+		));
 
 		let native_storage_result = if std::env::var("VSCODE_CLI_USE_FILE_KEYCHAIN").is_ok()
 			|| self.file_storage_path.exists()
@@ -477,6 +532,7 @@ impl Auth {
 		&self,
 		provider: Option<AuthProvider>,
 		access_token: Option<String>,
+		refresh_token: Option<String>,
 	) -> Result<StoredCredential, AnyError> {
 		let provider = match provider {
 			Some(p) => p,
@@ -487,12 +543,32 @@ impl Auth {
 			Some(t) => StoredCredential {
 				provider,
 				access_token: t,
-				refresh_token: None,
-				expires_at: None,
+				// if a refresh token is given, assume it's valid now but refresh it
+				// soon in order to get the real expiry time.
+				expires_at: refresh_token
+					.as_ref()
+					.map(|_| Timestamp::now() + SignedDuration::from_secs(5 * 60)),
+				refresh_token,
 			},
 			None => self.do_device_code_flow_with_provider(provider).await?,
 		};
 
+		self.store_credentials(credentials.clone());
+		Ok(credentials)
+	}
+
+	/// Runs the device-flow login for a specific provider with custom OAuth
+	/// scopes. Unlike [`login`], this is purpose-built for agent host auth
+	/// where the scopes are dictated by the server's protected resource
+	/// metadata rather than hardcoded defaults.
+	pub async fn login_with_scopes(
+		&self,
+		provider: AuthProvider,
+		scopes: Option<String>,
+	) -> Result<StoredCredential, AnyError> {
+		let credentials = self
+			.do_device_code_flow_with_scopes(provider, scopes)
+			.await?;
 		self.store_credentials(credentials.clone());
 		Ok(credentials)
 	}
@@ -510,6 +586,7 @@ impl Auth {
 					Ok(None) => old_creds,
 					Err(e) => {
 						info!(self.log, "error refreshing token: {}", e);
+						crate::tunnels::machine_status::emit_token_error(e.to_string());
 						let new_creds = self
 							.do_device_code_flow_with_provider(old_creds.provider)
 							.await?;
@@ -658,31 +735,35 @@ impl Auth {
 			.into();
 		}
 
-		return StatusError {
+		StatusError {
 			body: String::from_utf8_lossy(&body).to_string(),
 			status_code,
 			url: url.to_string(),
 		}
-		.into();
+		.into()
 	}
 	/// Implements the device code flow, returning the credentials upon success.
 	async fn do_device_code_flow(&self) -> Result<StoredCredential, AnyError> {
 		let provider = self.prompt_for_provider().await?;
-		self.do_device_code_flow_with_provider(provider).await
+		self.do_device_code_flow_with_scopes(provider, None).await
 	}
 
 	async fn prompt_for_provider(&self) -> Result<AuthProvider, AnyError> {
+		if let Some(provider) = self.forced_provider {
+			return Ok(provider);
+		}
+
 		if !*IS_INTERACTIVE_CLI {
 			info!(
 				self.log,
-				"Using Github for authentication, run `{} tunnel user login --provider <provider>` option to change this.",
+				"Using GitHub for authentication, run `{} tunnel user login --provider <provider>` option to change this.",
 				APPLICATION_NAME
 			);
 			return Ok(AuthProvider::Github);
 		}
 
 		let provider = prompt_options(
-			format!("How would you like to log in to {}?", PRODUCT_NAME_LONG),
+			format!("How would you like to log in to {PRODUCT_NAME_LONG}?"),
 			&[AuthProvider::Microsoft, AuthProvider::Github],
 		)?;
 
@@ -693,6 +774,17 @@ impl Auth {
 		&self,
 		provider: AuthProvider,
 	) -> Result<StoredCredential, AnyError> {
+		self.do_device_code_flow_with_scopes(provider, None).await
+	}
+
+	/// Runs the OAuth device code flow with optional custom scopes.
+	/// If `scopes` is `None`, falls back to the provider's default scopes.
+	pub async fn do_device_code_flow_with_scopes(
+		&self,
+		provider: AuthProvider,
+		scopes: Option<String>,
+	) -> Result<StoredCredential, AnyError> {
+		let scopes = scopes.unwrap_or_else(|| provider.get_default_scopes());
 		loop {
 			let init_code = self
 				.client
@@ -701,7 +793,7 @@ impl Auth {
 				.body(format!(
 					"client_id={}&scope={}",
 					provider.client_id(),
-					provider.get_default_scopes(),
+					scopes,
 				))
 				.send()
 				.await?;
@@ -711,11 +803,12 @@ impl Auth {
 			}
 
 			let init_code_json = init_code.json::<DeviceCodeResponse>().await?;
-			let expires_at = Utc::now() + chrono::Duration::seconds(init_code_json.expires_in);
+			let expires_at =
+				Timestamp::now() + SignedDuration::from_secs(init_code_json.expires_in);
 
 			match &init_code_json.message {
 				Some(m) => self.log.result(m),
-				None => self.log.result(&format!(
+				None => self.log.result(format!(
 					"To grant access to the server, please log into {} and use code {}",
 					init_code_json.verification_uri, init_code_json.user_code
 				)),
@@ -728,7 +821,7 @@ impl Auth {
 			);
 
 			let mut interval_s = 5;
-			while Utc::now() < expires_at {
+			while Timestamp::now() < expires_at {
 				sleep(std::time::Duration::from_secs(interval_s)).await;
 
 				match self.do_grant(provider, body.clone()).await {
@@ -765,7 +858,19 @@ impl Auth {
 				min_refresh
 			} else {
 				match credential.expires_at {
-					Some(d) => ((d - Utc::now()) * 2 / 3).to_std().unwrap_or(min_refresh),
+					Some(d) => {
+						let dur = d.duration_since(Timestamp::now());
+						let nanos = dur.as_nanos() * 2 / 3;
+						let scaled = SignedDuration::new(
+							(nanos / 1_000_000_000) as i64,
+							(nanos % 1_000_000_000) as i32,
+						);
+						if scaled.is_negative() {
+							min_refresh
+						} else {
+							scaled.unsigned_abs()
+						}
+					}
 					None => default_refresh,
 				}
 			};
@@ -784,6 +889,7 @@ impl Auth {
 				}
 				Err(e) => {
 					warning!(this.log, "error refreshing token: {:?}", e);
+					crate::tunnels::machine_status::emit_token_error(e.to_string());
 					last_did_error = true;
 					continue;
 				}
@@ -800,18 +906,25 @@ impl Auth {
 	}
 }
 
-#[async_trait]
 impl AuthorizationProvider for Auth {
-	async fn get_authorization(&self) -> Result<Authorization, HttpError> {
-		self.get_tunnel_authentication()
-			.await
-			.map_err(|e| HttpError::AuthorizationError(e.to_string()))
+	fn get_authorization(
+		&self,
+	) -> Pin<Box<dyn Future<Output = Result<Authorization, HttpError>> + Send + '_>> {
+		Box::pin(async move {
+			self.get_tunnel_authentication()
+				.await
+				.map_err(|e| HttpError::AuthorizationError(e.to_string()))
+		})
 	}
 }
 
-lazy_static::lazy_static! {
-	static ref HOSTNAME: Vec<u8> = gethostname().to_string_lossy().bytes().collect();
-}
+#[cfg(feature = "vscode-encrypt")]
+static HOSTNAME: std::sync::LazyLock<Vec<u8>> = std::sync::LazyLock::new(|| {
+	gethostname::gethostname()
+		.to_string_lossy()
+		.bytes()
+		.collect()
+});
 
 #[cfg(feature = "vscode-encrypt")]
 fn encrypt(value: &str) -> String {
@@ -832,4 +945,33 @@ fn encrypt(value: &str) -> String {
 #[cfg(not(feature = "vscode-encrypt"))]
 fn decrypt(value: &str) -> Option<String> {
 	Some(value.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn credential_expires_in_reports_positive_remaining_seconds() {
+		let now = Timestamp::from_second(1_000_000).unwrap();
+		let cases = [
+			(None, None),
+			(Some(now + SignedDuration::from_secs(3600)), Some(3600)),
+			(Some(now + SignedDuration::from_millis(1500)), Some(1)),
+			(Some(now + SignedDuration::from_millis(500)), None),
+			(Some(now), None),
+			(Some(now - SignedDuration::from_secs(60)), None),
+		];
+		let actual = cases.map(|(expires_at, _)| {
+			StoredCredential {
+				provider: AuthProvider::Microsoft,
+				access_token: "test-token".to_string(),
+				refresh_token: None,
+				expires_at,
+			}
+			.expires_in(now)
+		});
+
+		assert_eq!(actual, cases.map(|(_, expected)| expected));
+	}
 }

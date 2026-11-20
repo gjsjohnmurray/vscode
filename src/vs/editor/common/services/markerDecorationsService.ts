@@ -3,22 +3,23 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IMarkerService, IMarker, MarkerSeverity, MarkerTag } from 'vs/platform/markers/common/markers';
-import { Disposable, toDisposable } from 'vs/base/common/lifecycle';
-import { URI } from 'vs/base/common/uri';
-import { IModelDeltaDecoration, ITextModel, IModelDecorationOptions, TrackedRangeStickiness, OverviewRulerLane, IModelDecoration, MinimapPosition, IModelDecorationMinimapOptions } from 'vs/editor/common/model';
-import { ClassName } from 'vs/editor/common/model/intervalTree';
-import { themeColorFromId } from 'vs/platform/theme/common/themeService';
-import { ThemeColor } from 'vs/base/common/themables';
-import { overviewRulerWarning, overviewRulerInfo, overviewRulerError } from 'vs/editor/common/core/editorColorRegistry';
-import { IModelService } from 'vs/editor/common/services/model';
-import { Range } from 'vs/editor/common/core/range';
-import { IMarkerDecorationsService } from 'vs/editor/common/services/markerDecorations';
-import { Schemas } from 'vs/base/common/network';
-import { Emitter, Event } from 'vs/base/common/event';
-import { minimapInfo, minimapWarning, minimapError } from 'vs/platform/theme/common/colorRegistry';
-import { BidirectionalMap, ResourceMap } from 'vs/base/common/map';
-import { diffSets } from 'vs/base/common/collections';
+import { IMarkerService, IMarker, MarkerSeverity, MarkerTag } from '../../../platform/markers/common/markers.js';
+import { Disposable, IDisposable, toDisposable } from '../../../base/common/lifecycle.js';
+import { URI } from '../../../base/common/uri.js';
+import { IModelDeltaDecoration, ITextModel, IModelDecorationOptions, TrackedRangeStickiness, OverviewRulerLane, IModelDecoration, MinimapPosition, IModelDecorationMinimapOptions } from '../model.js';
+import { ClassName } from '../model/intervalTree.js';
+import { themeColorFromId } from '../../../platform/theme/common/themeService.js';
+import { ThemeColor } from '../../../base/common/themables.js';
+import { overviewRulerWarning, overviewRulerInfo, overviewRulerError } from '../core/editorColorRegistry.js';
+import { IModelService } from './model.js';
+import { Range } from '../core/range.js';
+import { IMarkerLimit, IMarkerDecorationsService } from './markerDecorations.js';
+import { Schemas } from '../../../base/common/network.js';
+import { Emitter, Event } from '../../../base/common/event.js';
+import { minimapInfo, minimapWarning, minimapError } from '../../../platform/theme/common/colorRegistry.js';
+import { BidirectionalMap, ResourceMap } from '../../../base/common/map.js';
+import { diffSets } from '../../../base/common/collections.js';
+import { Iterable } from '../../../base/common/iterator.js';
 
 export class MarkerDecorationsService extends Disposable implements IMarkerDecorationsService {
 
@@ -26,6 +27,11 @@ export class MarkerDecorationsService extends Disposable implements IMarkerDecor
 
 	private readonly _onDidChangeMarker = this._register(new Emitter<ITextModel>());
 	readonly onDidChangeMarker: Event<ITextModel> = this._onDidChangeMarker.event;
+
+	private readonly _onDidChangeMarkerLimit = this._register(new Emitter<ITextModel>());
+	readonly onDidChangeMarkerLimit: Event<ITextModel> = this._onDidChangeMarkerLimit.event;
+
+	private readonly _suppressedRanges = new ResourceMap<Set<Range>>();
 
 	private readonly _markerDecorations = new ResourceMap<MarkerDecorations>();
 
@@ -54,6 +60,32 @@ export class MarkerDecorationsService extends Disposable implements IMarkerDecor
 	getLiveMarkers(uri: URI): [Range, IMarker][] {
 		const markerDecorations = this._markerDecorations.get(uri);
 		return markerDecorations ? markerDecorations.getMarkers() : [];
+	}
+
+	getMarkerLimits(uri: URI): IMarkerLimit | undefined {
+		return this._markerDecorations.get(uri)?.markerLimit;
+	}
+
+	addMarkerSuppression(uri: URI, range: Range): IDisposable {
+
+		let suppressedRanges = this._suppressedRanges.get(uri);
+		if (!suppressedRanges) {
+			suppressedRanges = new Set<Range>();
+			this._suppressedRanges.set(uri, suppressedRanges);
+		}
+		suppressedRanges.add(range);
+		this._handleMarkerChange([uri]);
+
+		return toDisposable(() => {
+			const suppressedRanges = this._suppressedRanges.get(uri);
+			if (suppressedRanges) {
+				suppressedRanges.delete(range);
+				if (suppressedRanges.size === 0) {
+					this._suppressedRanges.delete(uri);
+				}
+				this._handleMarkerChange([uri]);
+			}
+		});
 	}
 
 	private _handleMarkerChange(changedResources: readonly URI[]): void {
@@ -87,17 +119,48 @@ export class MarkerDecorationsService extends Disposable implements IMarkerDecor
 	}
 
 	private _updateDecorations(markerDecorations: MarkerDecorations): void {
-		// Limit to the first 500 errors/warnings
-		const markers = this._markerService.read({ resource: markerDecorations.model.uri, take: 500 });
+		let markers = this._markerService.read({ resource: markerDecorations.model.uri, take: MarkerDecorations.MAX_MARKER_DECORATIONS_LIMIT + 1 });
+		const isMarkerLimitExceeded = markers.length > MarkerDecorations.MAX_MARKER_DECORATIONS_LIMIT;
+		if (isMarkerLimitExceeded) {
+			markers = markers.slice(0, MarkerDecorations.MAX_MARKER_DECORATIONS_LIMIT);
+		}
+
+		// filter markers from suppressed ranges
+		const suppressedRanges = this._suppressedRanges.get(markerDecorations.model.uri);
+		if (suppressedRanges) {
+			markers = markers.filter(marker => {
+				return !Iterable.some(suppressedRanges, candidate => Range.areIntersectingOrTouching(candidate, marker));
+			});
+		}
+
 		if (markerDecorations.update(markers)) {
 			this._onDidChangeMarker.fire(markerDecorations.model);
+		}
+		const isMarkersSourceTruncated = this._markerService.isSourceTruncated(markerDecorations.model.uri);
+		if (markerDecorations.updateMarkerLimit(isMarkersSourceTruncated, isMarkerLimitExceeded)) {
+			this._onDidChangeMarkerLimit.fire(markerDecorations.model);
 		}
 	}
 }
 
 class MarkerDecorations extends Disposable {
 
+	public static readonly MAX_MARKER_DECORATIONS_LIMIT = 5000;
+
 	private readonly _map = new BidirectionalMap<IMarker, /*decoration id*/string>();
+
+	private _isMarkerLimitExceeded: boolean = false;
+	private _isMarkersSourceTruncated: boolean = false;
+
+	/**
+	 * Return the current diagnostic limit state.
+	 */
+	public get markerLimit(): IMarkerLimit {
+		return {
+			isMarkersSourceTruncated: this._isMarkersSourceTruncated,
+			isMarkersTruncated: this._isMarkerLimitExceeded ? MarkerDecorations.MAX_MARKER_DECORATIONS_LIMIT : undefined
+		};
+	}
 
 	constructor(
 		readonly model: ITextModel
@@ -135,6 +198,15 @@ class MarkerDecorations extends Disposable {
 		for (let index = 0; index < ids.length; index++) {
 			this._map.set(added[index], ids[index]);
 		}
+		return true;
+	}
+
+	public updateMarkerLimit(isMarkersSourceTruncated: boolean, isMarkerLimitExceeded: boolean): boolean {
+		if (this._isMarkersSourceTruncated === isMarkersSourceTruncated && this._isMarkerLimitExceeded === isMarkerLimitExceeded) {
+			return false;
+		}
+		this._isMarkersSourceTruncated = isMarkersSourceTruncated;
+		this._isMarkerLimitExceeded = isMarkerLimitExceeded;
 		return true;
 	}
 

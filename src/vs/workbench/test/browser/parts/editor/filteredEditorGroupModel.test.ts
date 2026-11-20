@@ -3,27 +3,24 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import { EditorGroupModel, ISerializedEditorGroupModel } from 'vs/workbench/common/editor/editorGroupModel';
-import { EditorExtensions, IEditorFactoryRegistry, IFileEditorInput, IEditorSerializer, EditorsOrder, GroupModelChangeKind } from 'vs/workbench/common/editor';
-import { URI } from 'vs/base/common/uri';
-import { TestLifecycleService } from 'vs/workbench/test/browser/workbenchTestServices';
-import { TestConfigurationService } from 'vs/platform/configuration/test/common/testConfigurationService';
-import { TestInstantiationService } from 'vs/platform/instantiation/test/common/instantiationServiceMock';
-import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { ILifecycleService } from 'vs/workbench/services/lifecycle/common/lifecycle';
-import { IWorkspaceContextService } from 'vs/platform/workspace/common/workspace';
-import { Registry } from 'vs/platform/registry/common/platform';
-import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
-import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
-import { NullTelemetryService } from 'vs/platform/telemetry/common/telemetryUtils';
-import { IStorageService } from 'vs/platform/storage/common/storage';
-import { DisposableStore, IDisposable, toDisposable } from 'vs/base/common/lifecycle';
-import { TestContextService, TestStorageService } from 'vs/workbench/test/common/workbenchTestServices';
-import { EditorInput } from 'vs/workbench/common/editor/editorInput';
-import { isEqual } from 'vs/base/common/resources';
-import { ensureNoDisposablesAreLeakedInTestSuite } from 'vs/base/test/common/utils';
-import { StickyEditorGroupModel, UnstickyEditorGroupModel } from 'vs/workbench/common/editor/filteredEditorGroupModel';
+import assert from 'assert';
+import { EditorGroupModel } from '../../../../common/editor/editorGroupModel.js';
+import { EditorsOrder, GroupModelChangeKind } from '../../../../common/editor.js';
+import { TestLifecycleService } from '../../workbenchTestServices.js';
+import { TestConfigurationService } from '../../../../../platform/configuration/test/common/testConfigurationService.js';
+import { TestInstantiationService } from '../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
+import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { ILifecycleService } from '../../../../services/lifecycle/common/lifecycle.js';
+import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
+import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
+import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
+import { NullTelemetryService } from '../../../../../platform/telemetry/common/telemetryUtils.js';
+import { IStorageService } from '../../../../../platform/storage/common/storage.js';
+import { DisposableStore, IDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { TestContextService, TestStorageService } from '../../../common/workbenchTestServices.js';
+import { EditorInput } from '../../../../common/editor/editorInput.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { StickyEditorGroupModel, UnstickyEditorGroupModel } from '../../../../common/editor/filteredEditorGroupModel.js';
 
 suite('FilteredEditorGroupModel', () => {
 
@@ -51,8 +48,8 @@ suite('FilteredEditorGroupModel', () => {
 		return inst;
 	}
 
-	function createEditorGroupModel(serialized?: ISerializedEditorGroupModel): EditorGroupModel {
-		const group = disposables.add(inst().createInstance(EditorGroupModel, serialized));
+	function createEditorGroupModel(): EditorGroupModel {
+		const group = disposables.add(inst().createInstance(EditorGroupModel, undefined));
 
 		disposables.add(toDisposable(() => {
 			for (const editor of group.getEditors(EditorsOrder.MOST_RECENTLY_ACTIVE)) {
@@ -87,62 +84,8 @@ suite('FilteredEditorGroupModel', () => {
 		}
 	}
 
-	class NonSerializableTestEditorInput extends EditorInput {
-
-		readonly resource = undefined;
-
-		constructor(public id: string) {
-			super();
-		}
-		override get typeId() { return 'testEditorInputForGroups-nonSerializable'; }
-		override async resolve(): Promise<IDisposable | null> { return null; }
-
-		override matches(other: NonSerializableTestEditorInput): boolean {
-			return other && this.id === other.id && other instanceof NonSerializableTestEditorInput;
-		}
-	}
-
-	class TestFileEditorInput extends EditorInput implements IFileEditorInput {
-
-		readonly preferredResource = this.resource;
-
-		constructor(public id: string, public resource: URI) {
-			super();
-		}
-		override get typeId() { return 'testFileEditorInputForGroups'; }
-		override get editorId() { return this.id; }
-		override async resolve(): Promise<IDisposable | null> { return null; }
-		setPreferredName(name: string): void { }
-		setPreferredDescription(description: string): void { }
-		setPreferredResource(resource: URI): void { }
-		async setEncoding(encoding: string) { }
-		getEncoding() { return undefined; }
-		setPreferredEncoding(encoding: string) { }
-		setForceOpenAsBinary(): void { }
-		setPreferredContents(contents: string): void { }
-		setLanguageId(languageId: string) { }
-		setPreferredLanguageId(languageId: string) { }
-		isResolved(): boolean { return false; }
-
-		override matches(other: TestFileEditorInput): boolean {
-			if (super.matches(other)) {
-				return true;
-			}
-
-			if (other instanceof TestFileEditorInput) {
-				return isEqual(other.resource, this.resource);
-			}
-
-			return false;
-		}
-	}
-
-	function input(id = String(index++), nonSerializable?: boolean, resource?: URI): EditorInput {
-		if (resource) {
-			return disposables.add(new TestFileEditorInput(id, resource));
-		}
-
-		return nonSerializable ? disposables.add(new NonSerializableTestEditorInput(id)) : disposables.add(new TestEditorInput(id));
+	function input(id = String(index++)): EditorInput {
+		return disposables.add(new TestEditorInput(id));
 	}
 
 	function closeAllEditors(group: EditorGroupModel): void {
@@ -151,51 +94,7 @@ suite('FilteredEditorGroupModel', () => {
 		}
 	}
 
-	interface ISerializedTestInput {
-		id: string;
-	}
-
-	class TestEditorInputSerializer implements IEditorSerializer {
-
-		static disableSerialize = false;
-		static disableDeserialize = false;
-
-		canSerialize(editorInput: EditorInput): boolean {
-			return true;
-		}
-
-		serialize(editorInput: EditorInput): string | undefined {
-			if (TestEditorInputSerializer.disableSerialize) {
-				return undefined;
-			}
-
-			const testEditorInput = <TestEditorInput>editorInput;
-			const testInput: ISerializedTestInput = {
-				id: testEditorInput.id
-			};
-
-			return JSON.stringify(testInput);
-		}
-
-		deserialize(instantiationService: IInstantiationService, serializedEditorInput: string): EditorInput | undefined {
-			if (TestEditorInputSerializer.disableDeserialize) {
-				return undefined;
-			}
-
-			const testInput: ISerializedTestInput = JSON.parse(serializedEditorInput);
-
-			return disposables.add(new TestEditorInput(testInput.id));
-		}
-	}
-
 	const disposables = new DisposableStore();
-
-	setup(() => {
-		TestEditorInputSerializer.disableSerialize = false;
-		TestEditorInputSerializer.disableDeserialize = false;
-
-		disposables.add(Registry.as<IEditorFactoryRegistry>(EditorExtensions.EditorFactory).registerEditorSerializer('testEditorInputForGroups', TestEditorInputSerializer));
-	});
 
 	teardown(() => {
 		disposables.clear();
@@ -787,6 +686,28 @@ suite('FilteredEditorGroupModel', () => {
 		assert.strictEqual(dirty1CounterUnsticky, 1);
 		assert.strictEqual(label1ChangeCounterSticky, 0);
 		assert.strictEqual(label1ChangeCounterUnsticky, 1);
+	});
+
+	test('Sticky/Unsticky isTransient()', async () => {
+		const model = createEditorGroupModel();
+
+		const stickyFilteredEditorGroup = disposables.add(new StickyEditorGroupModel(model));
+		const unstickyFilteredEditorGroup = disposables.add(new UnstickyEditorGroupModel(model));
+
+		const input1 = input();
+		const input2 = input();
+		const input3 = input();
+		const input4 = input();
+
+		model.openEditor(input1, { pinned: true, transient: false });
+		model.openEditor(input2, { pinned: true });
+		model.openEditor(input3, { pinned: true, transient: true });
+		model.openEditor(input4, { pinned: false, transient: true });
+
+		assert.strictEqual(stickyFilteredEditorGroup.isTransient(input1), false);
+		assert.strictEqual(unstickyFilteredEditorGroup.isTransient(input2), false);
+		assert.strictEqual(stickyFilteredEditorGroup.isTransient(input3), true);
+		assert.strictEqual(unstickyFilteredEditorGroup.isTransient(input4), true);
 	});
 
 	ensureNoDisposablesAreLeakedInTestSuite();

@@ -3,16 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ITimeout, SequenceDiff } from 'vs/editor/common/diff/defaultLinesDiffComputer/algorithms/diffAlgorithm';
-import { DetailedLineRangeMapping, LineRangeMapping } from '../rangeMapping';
-import { pushMany, compareBy, numberComparator, reverseOrder } from 'vs/base/common/arrays';
-import { MonotonousArray, findLastMonotonous } from 'vs/base/common/arraysFind';
-import { SetMap } from 'vs/base/common/map';
-import { LineRange, LineRangeSet } from 'vs/editor/common/core/lineRange';
-import { OffsetRange } from 'vs/editor/common/core/offsetRange';
-import { LinesSliceCharSequence } from 'vs/editor/common/diff/defaultLinesDiffComputer/linesSliceCharSequence';
-import { LineRangeFragment, isSpace } from 'vs/editor/common/diff/defaultLinesDiffComputer/utils';
-import { MyersDiffAlgorithm } from 'vs/editor/common/diff/defaultLinesDiffComputer/algorithms/myersDiffAlgorithm';
+import { ITimeout, SequenceDiff } from './algorithms/diffAlgorithm.js';
+import { DetailedLineRangeMapping, LineRangeMapping } from '../rangeMapping.js';
+import { pushMany, compareBy, numberComparator, reverseOrder } from '../../../../base/common/arrays.js';
+import { MonotonousArray, findLastMonotonous } from '../../../../base/common/arraysFind.js';
+import { SetMap } from '../../../../base/common/map.js';
+import { LineRange, LineRangeSet } from '../../core/ranges/lineRange.js';
+import { LinesSliceCharSequence } from './linesSliceCharSequence.js';
+import { LineRangeFragment, isSpace } from './utils.js';
+import { MyersDiffAlgorithm } from './algorithms/myersDiffAlgorithm.js';
+import { Range } from '../../core/range.js';
 
 export function computeMovedLines(
 	changes: DetailedLineRangeMapping[],
@@ -207,7 +207,7 @@ function computeUnchangedMoves(
 		for (extendToTop = 0; extendToTop < linesAbove; extendToTop++) {
 			const origLine = move.original.startLineNumber - extendToTop - 1;
 			const modLine = move.modified.startLineNumber - extendToTop - 1;
-			if (origLine > originalLines.length || modLine > modifiedLines.length) {
+			if (origLine < 1 || modLine < 1) {
 				break;
 			}
 			if (modifiedSet.contains(modLine) || originalSet.contains(origLine)) {
@@ -260,8 +260,8 @@ function areLinesSimilar(line1: string, line2: string, timeout: ITimeout): boole
 
 	const myersDiffingAlgorithm = new MyersDiffAlgorithm();
 	const result = myersDiffingAlgorithm.compute(
-		new LinesSliceCharSequence([line1], new OffsetRange(0, 1), false),
-		new LinesSliceCharSequence([line2], new OffsetRange(0, 1), false),
+		new LinesSliceCharSequence([line1], new Range(1, 1, 1, line1.length), false),
+		new LinesSliceCharSequence([line2], new Range(1, 1, 1, line2.length), false),
 		timeout
 	);
 	let commonNonSpaceCharCount = 0;

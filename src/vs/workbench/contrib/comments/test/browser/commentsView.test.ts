@@ -3,22 +3,27 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import { workbenchInstantiationService } from 'vs/workbench/test/browser/workbenchTestServices';
-import { IRange, Range } from 'vs/editor/common/core/range';
-import { CommentsPanel } from 'vs/workbench/contrib/comments/browser/commentsView';
-import { CommentService, ICommentController, ICommentInfo, ICommentService, INotebookCommentInfo } from 'vs/workbench/contrib/comments/browser/commentService';
-import { Comment, CommentInput, CommentReaction, CommentThread, CommentThreadCollapsibleState, CommentThreadState } from 'vs/editor/common/languages';
-import { Emitter, Event } from 'vs/base/common/event';
-import { TestInstantiationService } from 'vs/platform/instantiation/test/common/instantiationServiceMock';
-import { IViewContainerModel, IViewDescriptor, IViewDescriptorService, ViewContainer, ViewContainerLocation } from 'vs/workbench/common/views';
-import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { TestConfigurationService } from 'vs/platform/configuration/test/common/testConfigurationService';
-import { IContextViewService } from 'vs/platform/contextview/browser/contextView';
-import { DisposableStore } from 'vs/base/common/lifecycle';
-import { ensureNoDisposablesAreLeakedInTestSuite } from 'vs/base/test/common/utils';
-import { CancellationToken } from 'vs/base/common/cancellation';
-import { URI, UriComponents } from 'vs/base/common/uri';
+import assert from 'assert';
+import { workbenchInstantiationService } from '../../../../test/browser/workbenchTestServices.js';
+import { IRange, Range } from '../../../../../editor/common/core/range.js';
+import { CommentsPanel } from '../../browser/commentsView.js';
+import { CommentService, ICommentController, ICommentInfo, ICommentService, INotebookCommentInfo } from '../../browser/commentService.js';
+import { Comment, CommentInput, CommentReaction, CommentThread, CommentThreadCollapsibleState, CommentThreadState } from '../../../../../editor/common/languages.js';
+import { Emitter, Event } from '../../../../../base/common/event.js';
+import { TestInstantiationService } from '../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
+import { IViewContainerModel, IViewDescriptor, IViewDescriptorService, IViewPaneContainer, ViewContainer, ViewContainerLocation } from '../../../../common/views.js';
+import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { TestConfigurationService } from '../../../../../platform/configuration/test/common/testConfigurationService.js';
+import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
+import { DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { CancellationToken } from '../../../../../base/common/cancellation.js';
+import { URI, UriComponents } from '../../../../../base/common/uri.js';
+import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
+import { NullHoverService } from '../../../../../platform/hover/test/browser/nullHoverService.js';
+import { SyncDescriptor } from '../../../../../platform/instantiation/common/descriptors.js';
+import { IModelService } from '../../../../../editor/common/services/model.js';
+import { Schemas } from '../../../../../base/common/network.js';
 
 class TestCommentThread implements CommentThread<IRange> {
 	isDocumentCommentThread(): this is CommentThread<IRange> {
@@ -31,15 +36,15 @@ class TestCommentThread implements CommentThread<IRange> {
 		public readonly range: IRange,
 		public readonly comments: Comment[]) { }
 
-	onDidChangeComments: Event<readonly Comment[] | undefined> = new Emitter<readonly Comment[] | undefined>().event;
-	onDidChangeInitialCollapsibleState: Event<CommentThreadCollapsibleState | undefined> = new Emitter<CommentThreadCollapsibleState | undefined>().event;
+	readonly onDidChangeComments: Event<readonly Comment[] | undefined> = new Emitter<readonly Comment[] | undefined>().event;
+	readonly onDidChangeInitialCollapsibleState: Event<CommentThreadCollapsibleState | undefined> = new Emitter<CommentThreadCollapsibleState | undefined>().event;
 	canReply: boolean = false;
-	onDidChangeInput: Event<CommentInput | undefined> = new Emitter<CommentInput | undefined>().event;
-	onDidChangeRange: Event<IRange> = new Emitter<IRange>().event;
-	onDidChangeLabel: Event<string | undefined> = new Emitter<string | undefined>().event;
-	onDidChangeCollapsibleState: Event<CommentThreadCollapsibleState | undefined> = new Emitter<CommentThreadCollapsibleState | undefined>().event;
-	onDidChangeState: Event<CommentThreadState | undefined> = new Emitter<CommentThreadState | undefined>().event;
-	onDidChangeCanReply: Event<boolean> = new Emitter<boolean>().event;
+	readonly onDidChangeInput: Event<CommentInput | undefined> = new Emitter<CommentInput | undefined>().event;
+	readonly onDidChangeRange: Event<IRange> = new Emitter<IRange>().event;
+	readonly onDidChangeLabel: Event<string | undefined> = new Emitter<string | undefined>().event;
+	readonly onDidChangeCollapsibleState: Event<CommentThreadCollapsibleState | undefined> = new Emitter<CommentThreadCollapsibleState | undefined>().event;
+	readonly onDidChangeState: Event<CommentThreadState | undefined> = new Emitter<CommentThreadState | undefined>().event;
+	readonly onDidChangeCanReply: Event<boolean> = new Emitter<boolean>().event;
 	isDisposed: boolean = false;
 	isTemplate: boolean = false;
 	label: string | undefined = undefined;
@@ -47,8 +52,10 @@ class TestCommentThread implements CommentThread<IRange> {
 }
 
 class TestCommentController implements ICommentController {
+	activeComment: { thread: CommentThread; comment?: Comment } | undefined;
 	id: string = 'test';
 	label: string = 'Test Comments';
+	owner: string = 'test';
 	features = {};
 	createCommentThreadTemplate(resource: UriComponents, range: IRange | undefined): Promise<void> {
 		throw new Error('Method not implemented.');
@@ -68,6 +75,9 @@ class TestCommentController implements ICommentController {
 	getNotebookComments(resource: URI, token: CancellationToken): Promise<INotebookCommentInfo> {
 		throw new Error('Method not implemented.');
 	}
+	setActiveCommentAndThread(commentInfo: { thread: CommentThread; comment: Comment } | undefined): Promise<void> {
+		throw new Error('Method not implemented.');
+	}
 
 }
 
@@ -83,7 +93,7 @@ export class TestViewDescriptorService implements Partial<IViewDescriptorService
 		return {
 			id: 'comments',
 			title: { value: 'Comments', original: 'Comments' },
-			ctorDescriptor: {} as any
+			ctorDescriptor: {} as SyncDescriptor<IViewPaneContainer>
 		};
 	}
 	getViewContainerModel(viewContainer: ViewContainer): IViewContainerModel {
@@ -114,6 +124,7 @@ suite('Comments View', function () {
 		disposables = new DisposableStore();
 		instantiationService = workbenchInstantiationService({}, disposables);
 		instantiationService.stub(IConfigurationService, new TestConfigurationService());
+		instantiationService.stub(IHoverService, NullHoverService);
 		instantiationService.stub(IContextViewService, {});
 		instantiationService.stub(IViewDescriptorService, new TestViewDescriptorService());
 		commentService = instantiationService.createInstance(CommentService);
@@ -174,5 +185,48 @@ suite('Comments View', function () {
 		assert.strictEqual(view.getFilterStats().total, 2);
 		assert.strictEqual(view.getFilterStats().filtered, 2);
 		view.dispose();
+	});
+
+	test('resource commenting ranges event fires once per resource', async function () {
+		const resource = URI.parse('file:///test.ts');
+		commentService.unregisterCommentController('test');
+		commentService.registerCommentController('test', new class extends TestCommentController {
+			override getDocumentComments(): Promise<ICommentInfo> {
+				return Promise.resolve({
+					uniqueOwner: 'test',
+					threads: [new TestCommentThread(1, 1, '1', resource.toString(), new Range(1, 1, 1, 1), [])],
+					commentingRanges: {
+						resource,
+						ranges: [],
+						fileComments: false,
+					},
+				});
+			}
+		}());
+		let eventCount = 0;
+		disposables.add(commentService.onResourceHasCommentingRanges(() => eventCount++));
+
+		await commentService.getDocumentComments(resource);
+		await commentService.getDocumentComments(resource);
+
+		assert.strictEqual(eventCount, 1);
+	});
+
+	test('does not query providers for comment input models', function () {
+		let requestCount = 0;
+		commentService.unregisterCommentController('test');
+		commentService.registerCommentController('test', new class extends TestCommentController {
+			override getDocumentComments(): Promise<ICommentInfo> {
+				requestCount++;
+				return Promise.reject(new Error('Comment input models must not reach comment providers'));
+			}
+		}());
+
+		disposables.add(instantiationService.get(IModelService).createModel('', null, URI.from({
+			scheme: Schemas.commentsInput,
+			path: '/test/comment.md',
+		})));
+
+		assert.strictEqual(requestCount, 0);
 	});
 });

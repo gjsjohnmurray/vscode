@@ -3,13 +3,15 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import assert from 'assert';
+import * as fs from 'fs';
 import { tmpdir } from 'os';
-import { getRandomTestPath } from 'vs/base/test/node/testUtils';
-import { Promises } from 'vs/base/node/pfs';
-import { SnapshotContext, assertSnapshot } from 'vs/base/test/common/snapshot';
-import { URI } from 'vs/base/common/uri';
-import * as path from 'path';
-import { assertThrowsAsync } from 'vs/base/test/common/utils';
+import { getRandomTestPath } from './testUtils.js';
+import { Promises } from '../../node/pfs.js';
+import { SnapshotContext, assertSnapshot } from '../common/snapshot.js';
+import { URI } from '../../common/uri.js';
+import { join } from '../../common/path.js';
+import { assertThrowsAsync, ensureNoDisposablesAreLeakedInTestSuite } from '../common/utils.js';
 
 // tests for snapshot are in Node so that we can use native FS operations to
 // set up and validate things.
@@ -19,9 +21,11 @@ import { assertThrowsAsync } from 'vs/base/test/common/utils';
 suite('snapshot', () => {
 	let testDir: string;
 
+	ensureNoDisposablesAreLeakedInTestSuite();
+
 	setup(function () {
 		testDir = getRandomTestPath(tmpdir(), 'vsctests', 'snapshot');
-		return Promises.mkdir(testDir, { recursive: true });
+		return fs.promises.mkdir(testDir, { recursive: true });
 	});
 
 	teardown(function () {
@@ -43,9 +47,9 @@ suite('snapshot', () => {
 		const printDir = async (dir: string, indent: number) => {
 			const children = await Promises.readdir(dir);
 			for (const child of children) {
-				const p = path.join(dir, child);
-				if ((await Promises.stat(p)).isFile()) {
-					const content = await Promises.readFile(p, 'utf-8');
+				const p = join(dir, child);
+				if ((await fs.promises.stat(p)).isFile()) {
+					const content = await fs.promises.readFile(p, 'utf-8');
 					str += `${' '.repeat(indent)}${child}:\n`;
 					for (const line of content.split('\n')) {
 						str += `${' '.repeat(indent + 2)}${line}\n`;
@@ -142,5 +146,19 @@ suite('snapshot', () => {
 			new Array(10).fill('long string'.repeat(10)),
 			{ [Symbol.for('debug.description')]() { return `Range [1 -> 5]`; } },
 		]);
+	});
+
+	test('cleans up mismatch artifacts after a passing assertion', async () => {
+		const ctx = makeContext({
+			file: 'foo/bar',
+			fullTitle: () => 'hello world!'
+		});
+		const snapshotName = 'hello_world_.traffic.snap';
+		await fs.promises.writeFile(join(testDir, snapshotName), '{ cool: true }');
+		await assertThrowsAsync(() => ctx.assert({ cool: false }, { name: 'traffic' }));
+		await ctx.assert({ cool: true }, { name: 'traffic' });
+		await ctx.removeOldSnapshots();
+
+		assert.deepStrictEqual(await fs.promises.readdir(testDir), [snapshotName]);
 	});
 });

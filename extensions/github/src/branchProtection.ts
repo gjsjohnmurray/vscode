@@ -3,55 +3,22 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { authentication, EventEmitter, LogOutputChannel, Memento, Uri, workspace } from 'vscode';
-import { Repository as GitHubRepository, RepositoryRuleset } from '@octokit/graphql-schema';
-import { AuthenticationError, getOctokitGraphql } from './auth';
-import { API, BranchProtection, BranchProtectionProvider, BranchProtectionRule, Repository } from './typings/git';
-import { DisposableStore, getRepositoryFromUrl } from './util';
-import TelemetryReporter from '@vscode/extension-telemetry';
+import { Disposable, EventEmitter, LogOutputChannel, Memento, Uri, workspace } from 'vscode';
+import type { GitHubRepositoryRuleset, GitHubRepositoryViewerInfo } from '@vscode/internal-github';
+import { AuthenticationError, GitHubService } from './auth.js';
+import type { API, BranchProtection, BranchProtectionProvider, BranchProtectionRule, Repository } from './typings/git.d.ts';
+import { DisposableStore, getRepositoryFromUrl } from './util.js';
+import { TelemetryReporter } from '@vscode/extension-telemetry';
 
-const REPOSITORY_QUERY = `
-	query repositoryPermissions($owner: String!, $repo: String!) {
-		repository(owner: $owner, name: $repo) {
-			defaultBranchRef {
-				name
-			},
-			viewerPermission
-		}
-	}
-`;
-
-const REPOSITORY_RULESETS_QUERY = `
-	query repositoryRulesets($owner: String!, $repo: String!, $cursor: String, $limit: Int = 100) {
-		repository(owner: $owner, name: $repo) {
-			rulesets(includeParents: true, first: $limit, after: $cursor) {
-				nodes {
-					name
-					enforcement
-					rules(type: PULL_REQUEST) {
-						totalCount
-					}
-					conditions {
-						refName {
-							include
-							exclude
-						}
-					}
-					target
-				},
-				pageInfo {
-					endCursor,
-					hasNextPage
-				}
-			}
-		}
-	}
-`;
-
-export class GithubBranchProtectionProviderManager {
+export class GitHubBranchProtectionProviderManager {
 
 	private readonly disposables = new DisposableStore();
-	private readonly providerDisposables = new DisposableStore();
+
+	/**
+	 * Branch protection providers, keyed by repository root. Entries are disposed
+	 * when the repository is closed so that closed repositories are not retained.
+	 */
+	private readonly providers = new Map<string, Disposable>();
 
 	private _enabled = false;
 	private set enabled(enabled: boolean) {
@@ -61,10 +28,10 @@ export class GithubBranchProtectionProviderManager {
 
 		if (enabled) {
 			for (const repository of this.gitAPI.repositories) {
-				this.providerDisposables.add(this.gitAPI.registerBranchProtectionProvider(repository.rootUri, new GithubBranchProtectionProvider(repository, this.globalState, this.logger, this.telemetryReporter)));
+				this.registerProvider(repository);
 			}
 		} else {
-			this.providerDisposables.dispose();
+			this.disposeProviders();
 		}
 
 		this._enabled = enabled;
@@ -73,12 +40,17 @@ export class GithubBranchProtectionProviderManager {
 	constructor(
 		private readonly gitAPI: API,
 		private readonly globalState: Memento,
+		private readonly githubService: GitHubService,
 		private readonly logger: LogOutputChannel,
 		private readonly telemetryReporter: TelemetryReporter) {
 		this.disposables.add(this.gitAPI.onDidOpenRepository(repository => {
 			if (this._enabled) {
-				this.providerDisposables.add(gitAPI.registerBranchProtectionProvider(repository.rootUri, new GithubBranchProtectionProvider(repository, this.globalState, this.logger, this.telemetryReporter)));
+				this.registerProvider(repository);
 			}
+		}));
+
+		this.disposables.add(this.gitAPI.onDidCloseRepository(repository => {
+			this.disposeProvider(repository.rootUri.toString());
 		}));
 
 		this.disposables.add(workspace.onDidChangeConfiguration(e => {
@@ -88,6 +60,32 @@ export class GithubBranchProtectionProviderManager {
 		}));
 
 		this.updateEnablement();
+	}
+
+	private registerProvider(repository: Repository): void {
+		const key = repository.rootUri.toString();
+		this.disposeProvider(key);
+
+		const provider = new GitHubBranchProtectionProvider(repository, this.globalState, this.githubService, this.logger, this.telemetryReporter);
+		const registration = this.gitAPI.registerBranchProtectionProvider(repository.rootUri, provider);
+
+		this.providers.set(key, new Disposable(() => {
+			registration.dispose();
+			provider.dispose();
+		}));
+	}
+
+	private disposeProvider(key: string): void {
+		this.providers.get(key)?.dispose();
+		this.providers.delete(key);
+	}
+
+	private disposeProviders(): void {
+		for (const provider of this.providers.values()) {
+			provider.dispose();
+		}
+
+		this.providers.clear();
 	}
 
 	private updateEnablement(): void {
@@ -102,27 +100,33 @@ export class GithubBranchProtectionProviderManager {
 
 }
 
-export class GithubBranchProtectionProvider implements BranchProtectionProvider {
+export class GitHubBranchProtectionProvider implements BranchProtectionProvider {
 	private readonly _onDidChangeBranchProtection = new EventEmitter<Uri>();
 	onDidChangeBranchProtection = this._onDidChangeBranchProtection.event;
 
 	private branchProtection: BranchProtection[];
-	private readonly globalStateKey = `branchProtection:${this.repository.rootUri.toString()}`;
+	private readonly globalStateKey: string;
+
+	private readonly disposables = new DisposableStore();
 
 	constructor(
 		private readonly repository: Repository,
 		private readonly globalState: Memento,
+		private readonly githubService: GitHubService,
 		private readonly logger: LogOutputChannel,
-		private readonly telemetryReporter: TelemetryReporter) {
+		private readonly telemetryReporter: TelemetryReporter
+	) {
+		this.globalStateKey = `branchProtection:${this.repository.rootUri.toString()}`;
+
+		this.disposables.add(this._onDidChangeBranchProtection);
+
 		// Restore branch protection from global state
 		this.branchProtection = this.globalState.get<BranchProtection[]>(this.globalStateKey, []);
 
 		repository.status().then(() => {
-			authentication.onDidChangeSessions(e => {
-				if (e.provider.id === 'github') {
-					this.updateRepositoryBranchProtection();
-				}
-			});
+			this.disposables.add(this.githubService.onDidChangeSessions(() => {
+				this.updateRepositoryBranchProtection();
+			}));
 			this.updateRepositoryBranchProtection();
 		});
 	}
@@ -131,34 +135,24 @@ export class GithubBranchProtectionProvider implements BranchProtectionProvider 
 		return this.branchProtection;
 	}
 
-	private async getRepositoryDetails(owner: string, repo: string): Promise<GitHubRepository> {
-		const graphql = await getOctokitGraphql();
-		const { repository } = await graphql<{ repository: GitHubRepository }>(REPOSITORY_QUERY, { owner, repo });
-
+	private async getRepositoryDetails(owner: string, repo: string): Promise<GitHubRepositoryViewerInfo> {
+		const client = await this.githubService.getClient(true);
+		const repository = await client.repositories.getViewerInfo({ owner, repo });
+		if (!repository) {
+			throw new Error('GitHub repository details are unavailable.');
+		}
 		return repository;
 	}
 
-	private async getRepositoryRulesets(owner: string, repo: string): Promise<RepositoryRuleset[]> {
-		const rulesets: RepositoryRuleset[] = [];
-
-		let cursor: string | undefined = undefined;
-		const graphql = await getOctokitGraphql();
-
-		while (true) {
-			const { repository } = await graphql<{ repository: GitHubRepository }>(REPOSITORY_RULESETS_QUERY, { owner, repo, cursor });
-
-			rulesets.push(...(repository.rulesets?.nodes ?? [])
-				// Active branch ruleset that contains the pull request required rule
-				.filter(node => node && node.target === 'BRANCH' && node.enforcement === 'ACTIVE' && (node.rules?.totalCount ?? 0) > 0) as RepositoryRuleset[]);
-
-			if (repository.rulesets?.pageInfo.hasNextPage) {
-				cursor = repository.rulesets.pageInfo.endCursor as string | undefined;
-			} else {
-				break;
-			}
+	private async getRepositoryRulesets(owner: string, repo: string): Promise<GitHubRepositoryRuleset[]> {
+		const client = await this.githubService.getClient(true);
+		const result = await client.repositories.listRulesetConnection({ owner, repo }, { maxPages: 1000 });
+		if (!result) {
+			throw new Error('GitHub repository rulesets are unavailable.');
 		}
 
-		return rulesets;
+		// Active branch ruleset that contains the pull request required rule
+		return (result.nodes ?? []).filter((node): node is GitHubRepositoryRuleset => node !== null && node.target === 'BRANCH' && node.enforcement === 'ACTIVE' && (node.rules?.totalCount ?? 0) > 0);
 	}
 
 	private async updateRepositoryBranchProtection(): Promise<void> {
@@ -173,12 +167,12 @@ export class GithubBranchProtectionProvider implements BranchProtectionProvider 
 				}
 
 				// Repository details
-				this.logger.trace(`Fetching repository details for "${repository.owner}/${repository.repo}".`);
+				this.logger.trace(`[GitHubBranchProtectionProvider][updateRepositoryBranchProtection] Fetching repository details for "${repository.owner}/${repository.repo}".`);
 				const repositoryDetails = await this.getRepositoryDetails(repository.owner, repository.repo);
 
 				// Check repository write permission
 				if (repositoryDetails.viewerPermission !== 'ADMIN' && repositoryDetails.viewerPermission !== 'MAINTAIN' && repositoryDetails.viewerPermission !== 'WRITE') {
-					this.logger.trace(`Skipping branch protection for "${repository.owner}/${repository.repo}" due to missing repository write permission.`);
+					this.logger.trace(`[GitHubBranchProtectionProvider][updateRepositoryBranchProtection] Skipping branch protection for "${repository.owner}/${repository.repo}" due to missing repository write permission.`);
 					continue;
 				}
 
@@ -188,8 +182,8 @@ export class GithubBranchProtectionProvider implements BranchProtectionProvider 
 
 				for (const ruleset of repositoryRulesets) {
 					branchProtectionRules.push({
-						include: (ruleset.conditions.refName?.include ?? []).map(r => this.parseRulesetRefName(repositoryDetails, r)),
-						exclude: (ruleset.conditions.refName?.exclude ?? []).map(r => this.parseRulesetRefName(repositoryDetails, r))
+						include: (ruleset.conditions?.refName?.include ?? []).map(r => this.parseRulesetRefName(repositoryDetails, r)),
+						exclude: (ruleset.conditions?.refName?.exclude ?? []).map(r => this.parseRulesetRefName(repositoryDetails, r))
 					});
 				}
 
@@ -201,7 +195,7 @@ export class GithubBranchProtectionProvider implements BranchProtectionProvider 
 
 			// Save branch protection to global state
 			await this.globalState.update(this.globalStateKey, branchProtection);
-			this.logger.trace(`Branch protection for "${this.repository.rootUri.toString()}": ${JSON.stringify(branchProtection)}.`);
+			this.logger.trace(`[GitHubBranchProtectionProvider][updateRepositoryBranchProtection] Branch protection for "${this.repository.rootUri.toString()}": ${JSON.stringify(branchProtection)}.`);
 
 			/* __GDPR__
 				"branchProtection" : {
@@ -211,7 +205,7 @@ export class GithubBranchProtectionProvider implements BranchProtectionProvider 
 			*/
 			this.telemetryReporter.sendTelemetryEvent('branchProtection', undefined, { rulesetCount: this.branchProtection.length });
 		} catch (err) {
-			this.logger.warn(`Failed to update repository branch protection: ${err.message}`);
+			this.logger.warn(`[GitHubBranchProtectionProvider][updateRepositoryBranchProtection] Failed to update repository branch protection: ${err.message}`);
 
 			if (err instanceof AuthenticationError) {
 				// A GitHub authentication session could be missing if the user has not yet
@@ -227,7 +221,7 @@ export class GithubBranchProtectionProvider implements BranchProtectionProvider 
 		}
 	}
 
-	private parseRulesetRefName(repository: GitHubRepository, refName: string): string {
+	private parseRulesetRefName(repository: GitHubRepositoryViewerInfo, refName: string): string {
 		if (refName.startsWith('refs/heads/')) {
 			return refName.substring(11);
 		}
@@ -240,5 +234,9 @@ export class GithubBranchProtectionProvider implements BranchProtectionProvider 
 			default:
 				return refName;
 		}
+	}
+
+	dispose(): void {
+		this.disposables.dispose();
 	}
 }

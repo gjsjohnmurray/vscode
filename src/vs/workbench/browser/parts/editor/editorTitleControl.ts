@@ -3,21 +3,21 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import 'vs/css!./media/editortitlecontrol';
-import { Dimension, clearNode } from 'vs/base/browser/dom';
-import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
-import { IThemeService, Themable } from 'vs/platform/theme/common/themeService';
-import { BreadcrumbsControl, BreadcrumbsControlFactory } from 'vs/workbench/browser/parts/editor/breadcrumbsControl';
-import { IEditorGroupsView, IEditorGroupTitleHeight, IEditorGroupView, IEditorPartsView, IInternalEditorOpenOptions } from 'vs/workbench/browser/parts/editor/editor';
-import { IEditorTabsControl } from 'vs/workbench/browser/parts/editor/editorTabsControl';
-import { MultiEditorTabsControl } from 'vs/workbench/browser/parts/editor/multiEditorTabsControl';
-import { SingleEditorTabsControl } from 'vs/workbench/browser/parts/editor/singleEditorTabsControl';
-import { IEditorPartOptions } from 'vs/workbench/common/editor';
-import { EditorInput } from 'vs/workbench/common/editor/editorInput';
-import { DisposableStore } from 'vs/base/common/lifecycle';
-import { MultiRowEditorControl } from 'vs/workbench/browser/parts/editor/multiRowEditorTabsControl';
-import { IReadonlyEditorGroupModel } from 'vs/workbench/common/editor/editorGroupModel';
-import { NoEditorTabsControl } from 'vs/workbench/browser/parts/editor/noEditorTabsControl';
+import './media/editortitlecontrol.css';
+import { Dimension, clearNode } from '../../../../base/browser/dom.js';
+import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
+import { IThemeService, Themable } from '../../../../platform/theme/common/themeService.js';
+import { IEditorGroupMenuIds, IEditorGroupsView, IEditorGroupTitleHeight, IEditorGroupView, IEditorGroupViewOptions, IEditorPartsView, IInternalEditorOpenOptions } from './editor.js';
+import { IEditorTabsControl } from './editorTabsControl.js';
+import { MultiEditorTabsControl } from './multiEditorTabsControl.js';
+import { SingleEditorTabsControl } from './singleEditorTabsControl.js';
+import { IEditorPartOptions } from '../../../common/editor.js';
+import { EditorInput } from '../../../common/editor/editorInput.js';
+import { DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
+import { MultiRowEditorControl } from './multiRowEditorTabsControl.js';
+import { IReadonlyEditorGroupModel } from '../../../common/editor/editorGroupModel.js';
+import { NoEditorTabsControl } from './noEditorTabsControl.js';
+import { EditorHeaderControl } from './editorHeaderControl.js';
 
 export interface IEditorTitleControlDimensions {
 
@@ -36,11 +36,10 @@ export interface IEditorTitleControlDimensions {
 export class EditorTitleControl extends Themable {
 
 	private editorTabsControl: IEditorTabsControl;
-	private editorTabsControlDisposable = this._register(new DisposableStore());
+	private readonly editorTabsControlDisposable = this._register(new DisposableStore());
 
-	private breadcrumbsControlFactory: BreadcrumbsControlFactory | undefined;
-	private breadcrumbsControlDisposables = this._register(new DisposableStore());
-	private get breadcrumbsControl() { return this.breadcrumbsControlFactory?.control; }
+	private headerControl: EditorHeaderControl;
+	private readonly headerControlDisposable = this._register(new MutableDisposable<EditorHeaderControl>());
 
 	constructor(
 		private readonly parent: HTMLElement,
@@ -48,13 +47,18 @@ export class EditorTitleControl extends Themable {
 		private readonly groupsView: IEditorGroupsView,
 		private readonly groupView: IEditorGroupView,
 		private readonly model: IReadonlyEditorGroupModel,
+		private readonly menuIds: IEditorGroupMenuIds | undefined,
+		private readonly showHeader: boolean,
+		private readonly reserveHeaderSpace: IEditorGroupViewOptions['reserveHeaderSpace'],
+		private readonly useModernUITabs: boolean,
+		private readonly showHeaderFor: IEditorGroupViewOptions['showHeaderFor'],
 		@IInstantiationService private instantiationService: IInstantiationService,
 		@IThemeService themeService: IThemeService
 	) {
 		super(themeService);
 
 		this.editorTabsControl = this.createEditorTabsControl();
-		this.breadcrumbsControlFactory = this.createBreadcrumbsControl();
+		this.headerControl = this.createHeaderControl();
 	}
 
 	private createEditorTabsControl(): IEditorTabsControl {
@@ -72,33 +76,14 @@ export class EditorTitleControl extends Themable {
 				break;
 		}
 
-		const control = this.instantiationService.createInstance(tabsControlType, this.parent, this.editorPartsView, this.groupsView, this.groupView, this.model);
+		const control = this.instantiationService.createInstance(tabsControlType, this.parent, this.editorPartsView, this.groupsView, this.groupView, this.model, this.menuIds, this.showHeader, this.useModernUITabs);
 		return this.editorTabsControlDisposable.add(control);
 	}
 
-	private createBreadcrumbsControl(): BreadcrumbsControlFactory | undefined {
-		if (this.groupsView.partOptions.showTabs === 'single') {
-			return undefined; // Single tabs have breadcrumbs inlined. No tabs have no breadcrumbs.
-		}
-
-		// Breadcrumbs container
-		const breadcrumbsContainer = document.createElement('div');
-		breadcrumbsContainer.classList.add('breadcrumbs-below-tabs');
-		this.parent.appendChild(breadcrumbsContainer);
-
-		const breadcrumbsControlFactory = this.breadcrumbsControlDisposables.add(this.instantiationService.createInstance(BreadcrumbsControlFactory, breadcrumbsContainer, this.groupView, {
-			showFileIcons: true,
-			showSymbolIcons: true,
-			showDecorationColors: false,
-			showPlaceholder: true
-		}));
-
-		// Breadcrumbs enablement & visibility change have an impact on layout
-		// so we need to relayout the editor group when that happens.
-		this.breadcrumbsControlDisposables.add(breadcrumbsControlFactory.onDidEnablementChange(() => this.groupView.relayout()));
-		this.breadcrumbsControlDisposables.add(breadcrumbsControlFactory.onDidVisibilityChange(() => this.groupView.relayout()));
-
-		return breadcrumbsControlFactory;
+	private createHeaderControl(): EditorHeaderControl {
+		const control = this.instantiationService.createInstance(EditorHeaderControl, this.parent, this.groupView, this.groupsView, this.menuIds, this.showHeader, this.reserveHeaderSpace, this.showHeaderFor);
+		this.headerControlDisposable.value = control;
+		return control;
 	}
 
 	openEditor(editor: EditorInput, options?: IInternalEditorOpenOptions): void {
@@ -114,11 +99,7 @@ export class EditorTitleControl extends Themable {
 	}
 
 	private handleOpenedEditors(didChange: boolean): void {
-		if (didChange) {
-			this.breadcrumbsControl?.update();
-		} else {
-			this.breadcrumbsControl?.revealLast();
-		}
+		this.headerControl.handleEditorsChange(didChange);
 	}
 
 	beforeCloseEditor(editor: EditorInput): void {
@@ -139,7 +120,7 @@ export class EditorTitleControl extends Themable {
 
 	private handleClosedEditors(): void {
 		if (!this.groupView.activeEditor) {
-			this.breadcrumbsControl?.update();
+			this.headerControl.handleEditorsChange(true);
 		}
 	}
 
@@ -163,8 +144,24 @@ export class EditorTitleControl extends Themable {
 		return this.editorTabsControl.setActive(isActive);
 	}
 
+	updateEditorSelections(): void {
+		this.editorTabsControl.updateEditorSelections();
+	}
+
+	updateEditorActions(): void {
+		this.editorTabsControl.updateEditorActions();
+	}
+
 	updateEditorLabel(editor: EditorInput): void {
-		return this.editorTabsControl.updateEditorLabel(editor);
+		this.editorTabsControl.updateEditorLabel(editor);
+		if (this.groupView.activeEditor === editor) {
+			// An active input may change its effective resource without being reopened.
+			this.headerControl.handleEditorsChange(true);
+		}
+	}
+
+	updateEditorCapabilities(editor: EditorInput): void {
+		this.editorTabsControl.updateEditorCapabilities(editor);
 	}
 
 	updateEditorDirty(editor: EditorInput): void {
@@ -172,6 +169,7 @@ export class EditorTitleControl extends Themable {
 	}
 
 	updateOptions(oldOptions: IEditorPartOptions, newOptions: IEditorPartOptions): void {
+
 		// Update editor tabs control if options changed
 		if (
 			oldOptions.showTabs !== newOptions.showTabs ||
@@ -179,12 +177,12 @@ export class EditorTitleControl extends Themable {
 		) {
 			// Clear old
 			this.editorTabsControlDisposable.clear();
-			this.breadcrumbsControlDisposables.clear();
+			this.headerControlDisposable.clear();
 			clearNode(this.parent);
 
 			// Create new
 			this.editorTabsControl = this.createEditorTabsControl();
-			this.breadcrumbsControlFactory = this.createBreadcrumbsControl();
+			this.headerControl = this.createHeaderControl();
 		}
 
 		// Forward into editor tabs control
@@ -193,30 +191,21 @@ export class EditorTitleControl extends Themable {
 		}
 	}
 
-	layout(dimensions: IEditorTitleControlDimensions): Dimension {
+	layout(dimensions: IEditorTitleControlDimensions, headerWidth = dimensions.container.width, headerLeft = 0): Dimension {
 
 		// Layout tabs control
-		const tabsControlDimension = this.editorTabsControl.layout(dimensions);
+		this.editorTabsControl.layout(dimensions);
 
-		// Layout breadcrumbs if visible
-		let breadcrumbsControlDimension: Dimension | undefined = undefined;
-		if (this.breadcrumbsControl?.isHidden() === false) {
-			breadcrumbsControlDimension = new Dimension(dimensions.container.width, BreadcrumbsControl.HEIGHT);
-			this.breadcrumbsControl.layout(breadcrumbsControlDimension);
-		}
+		this.headerControl.layout(headerWidth, headerLeft);
 
-		return new Dimension(
-			dimensions.container.width,
-			tabsControlDimension.height + (breadcrumbsControlDimension ? breadcrumbsControlDimension.height : 0)
-		);
+		return new Dimension(dimensions.container.width, this.getHeight().total);
 	}
 
 	getHeight(): IEditorGroupTitleHeight {
 		const tabsControlHeight = this.editorTabsControl.getHeight();
-		const breadcrumbsControlHeight = this.breadcrumbsControl?.isHidden() === false ? BreadcrumbsControl.HEIGHT : 0;
 
 		return {
-			total: tabsControlHeight + breadcrumbsControlHeight,
+			total: tabsControlHeight + this.headerControl.height,
 			offset: tabsControlHeight
 		};
 	}

@@ -3,35 +3,58 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Action, IAction, Separator, SubmenuAction } from 'vs/base/common/actions';
-import { Codicon } from 'vs/base/common/codicons';
-import { Schemas } from 'vs/base/common/network';
-import { localize } from 'vs/nls';
-import { IMenu, MenuId, MenuRegistry } from 'vs/platform/actions/common/actions';
-import { ContextKeyExpr } from 'vs/platform/contextkey/common/contextkey';
-import { IExtensionTerminalProfile, ITerminalProfile, TerminalLocation, TerminalSettingId } from 'vs/platform/terminal/common/terminal';
-import { ResourceContextKey } from 'vs/workbench/common/contextkeys';
-import { TaskExecutionSupportedContext } from 'vs/workbench/contrib/tasks/common/taskService';
-import { ICreateTerminalOptions, ITerminalLocationOptions, ITerminalService } from 'vs/workbench/contrib/terminal/browser/terminal';
-import { TerminalCommandId, TERMINAL_VIEW_ID } from 'vs/workbench/contrib/terminal/common/terminal';
-import { TerminalContextKeys, TerminalContextKeyStrings } from 'vs/workbench/contrib/terminal/common/terminalContextKey';
-import { terminalStrings } from 'vs/workbench/contrib/terminal/common/terminalStrings';
-import { ACTIVE_GROUP, SIDE_GROUP } from 'vs/workbench/services/editor/common/editorService';
+import { Action, IAction, Separator, SubmenuAction } from '../../../../base/common/actions.js';
+import { Codicon } from '../../../../base/common/codicons.js';
+import { Schemas } from '../../../../base/common/network.js';
+import { localize, localize2 } from '../../../../nls.js';
+import { IMenu, MenuId, MenuRegistry } from '../../../../platform/actions/common/actions.js';
+import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
+import { IExtensionTerminalProfile, ITerminalProfile, TerminalLocation, TerminalSettingId } from '../../../../platform/terminal/common/terminal.js';
+import { LayoutModeContext, ResourceContextKey } from '../../../common/contextkeys.js';
+import { TaskExecutionSupportedContext } from '../../tasks/common/taskService.js';
+import { ICreateTerminalOptions, ITerminalLocationOptions, ITerminalService } from './terminal.js';
+import { TerminalCommandId, TERMINAL_VIEW_ID } from '../common/terminal.js';
+import { TerminalContextKeys, TerminalContextKeyStrings } from '../common/terminalContextKey.js';
+import { terminalStrings } from '../common/terminalStrings.js';
+import { ACTIVE_GROUP, AUX_WINDOW_GROUP, SIDE_GROUP } from '../../../services/editor/common/editorService.js';
+import { DisposableStore } from '../../../../base/common/lifecycle.js';
+import { HasSpeechProvider } from '../../speech/common/speechService.js';
+import { ChatContextKeys } from '../../chat/common/actions/chatContextKeys.js';
+import { hasKey } from '../../../../base/common/types.js';
+import { TerminalContribContextKeyStrings } from '../terminalContribExports.js';
 
-const enum ContextMenuGroup {
+export const enum TerminalContextMenuGroup {
+	Chat = '0_chat',
 	Create = '1_create',
-	Edit = '2_edit',
-	Clear = '3_clear',
-	Kill = '4_kill',
-	Config = '5_config'
+	Edit = '3_edit',
+	Clear = '5_clear',
+	Kill = '7_kill',
+	Config = '9_config'
 }
 
 export const enum TerminalMenuBarGroup {
 	Create = '1_create',
-	Run = '2_run',
-	Manage = '3_manage',
-	Configure = '4_configure'
+	Run = '3_run',
+	Manage = '5_manage',
+	Configure = '7_configure'
 }
+
+/**
+ * True when a dictation engine is available for the terminal: either the
+ * built-in on-device engine (with AI features enabled) or the speech
+ * extension's provider. Used to gate the "Start Dictation" context menu entry
+ * so it only shows when dictation can actually be started.
+ */
+const TerminalDictationAvailable = ContextKeyExpr.or(
+	HasSpeechProvider,
+	ContextKeyExpr.and(ChatContextKeys.enabled, ChatContextKeys.speechToTextConfigured)
+);
+
+/**
+ * Where the context menu of a terminal editor's tab offers to move it into the panel: not in a window with layout modes,
+ * which keeps its terminals in a part of its own, while the panel is the main window's.
+ */
+export const MoveTerminalEditorToPanelWhen = ContextKeyExpr.and(ResourceContextKey.Scheme.isEqualTo(Schemas.vscodeTerminal), LayoutModeContext.negate());
 
 export function setupTerminalMenus(): void {
 	MenuRegistry.appendMenuItems(
@@ -45,6 +68,19 @@ export function setupTerminalMenus(): void {
 						title: localize({ key: 'miNewTerminal', comment: ['&& denotes a mnemonic'] }, "&&New Terminal")
 					},
 					order: 1
+				}
+			},
+			{
+				id: MenuId.MenubarTerminalMenu,
+				item: {
+					group: TerminalMenuBarGroup.Create,
+					command: {
+						id: TerminalCommandId.NewInNewWindow,
+						title: localize({ key: 'miNewInNewWindow', comment: ['&& denotes a mnemonic'] }, "New Terminal &&Window"),
+						precondition: ContextKeyExpr.has(TerminalContextKeyStrings.IsOpen)
+					},
+					order: 2,
+					when: TerminalContextKeys.processSupported
 				}
 			},
 			{
@@ -83,7 +119,7 @@ export function setupTerminalMenus(): void {
 					order: 4,
 					when: TerminalContextKeys.processSupported
 				}
-			}
+			},
 		]
 	);
 
@@ -92,31 +128,11 @@ export function setupTerminalMenus(): void {
 			{
 				id: MenuId.TerminalInstanceContext,
 				item: {
-					group: ContextMenuGroup.Create,
-					command: {
-						id: TerminalCommandId.Split,
-						title: terminalStrings.split.value
-					}
-				}
-			},
-			{
-				id: MenuId.TerminalInstanceContext,
-				item: {
-					command: {
-						id: TerminalCommandId.New,
-						title: terminalStrings.new
-					},
-					group: ContextMenuGroup.Create
-				}
-			},
-			{
-				id: MenuId.TerminalInstanceContext,
-				item: {
 					command: {
 						id: TerminalCommandId.KillViewOrEditor,
 						title: terminalStrings.kill.value,
 					},
-					group: ContextMenuGroup.Kill
+					group: TerminalContextMenuGroup.Kill
 				}
 			},
 			{
@@ -126,7 +142,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.CopySelection,
 						title: localize('workbench.action.terminal.copySelection.short', "Copy")
 					},
-					group: ContextMenuGroup.Edit,
+					group: TerminalContextMenuGroup.Edit,
 					order: 1
 				}
 			},
@@ -137,7 +153,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.CopySelectionAsHtml,
 						title: localize('workbench.action.terminal.copySelectionAsHtml', "Copy as HTML")
 					},
-					group: ContextMenuGroup.Edit,
+					group: TerminalContextMenuGroup.Edit,
 					order: 2
 				}
 			},
@@ -148,7 +164,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.Paste,
 						title: localize('workbench.action.terminal.paste.short', "Paste")
 					},
-					group: ContextMenuGroup.Edit,
+					group: TerminalContextMenuGroup.Edit,
 					order: 3
 				}
 			},
@@ -159,7 +175,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.Clear,
 						title: localize('workbench.action.terminal.clear', "Clear")
 					},
-					group: ContextMenuGroup.Clear,
+					group: TerminalContextMenuGroup.Clear,
 				}
 			},
 			{
@@ -169,7 +185,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.SizeToContentWidth,
 						title: terminalStrings.toggleSizeToContentWidth
 					},
-					group: ContextMenuGroup.Config
+					group: TerminalContextMenuGroup.Config
 				}
 			},
 
@@ -180,19 +196,51 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.SelectAll,
 						title: localize('workbench.action.terminal.selectAll', "Select All"),
 					},
-					group: ContextMenuGroup.Edit,
+					group: TerminalContextMenuGroup.Edit,
 					order: 3
+				}
+			},
+			{
+				id: MenuId.TerminalInstanceContext,
+				item: {
+					command: {
+						id: TerminalCommandId.StartVoice,
+						title: localize('workbench.action.terminal.startVoiceContext', "Start Dictation"),
+					},
+					group: TerminalContextMenuGroup.Edit,
+					order: 4,
+					when: ContextKeyExpr.and(TerminalDictationAvailable, TerminalContextKeys.terminalDictationInProgress.toNegated())
 				}
 			},
 		]
 	);
+
+	MenuRegistry.appendMenuItem(MenuId.EditorTabsBarContext, {
+		command: {
+			id: TerminalCommandId.CreateTerminalEditorSameGroup,
+			title: terminalStrings.new
+		},
+		group: '1_zzz_file',
+		order: 30,
+		when: TerminalContextKeys.processSupported
+	});
+
+	MenuRegistry.appendMenuItem(MenuId.EmptyEditorGroupContext, {
+		command: {
+			id: TerminalCommandId.CreateTerminalEditorSameGroup,
+			title: terminalStrings.new
+		},
+		group: '1_zzz_file',
+		order: 30,
+		when: TerminalContextKeys.processSupported
+	});
 
 	MenuRegistry.appendMenuItems(
 		[
 			{
 				id: MenuId.TerminalEditorInstanceContext,
 				item: {
-					group: ContextMenuGroup.Create,
+					group: TerminalContextMenuGroup.Create,
 					command: {
 						id: TerminalCommandId.Split,
 						title: terminalStrings.split.value
@@ -206,7 +254,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.New,
 						title: terminalStrings.new
 					},
-					group: ContextMenuGroup.Create
+					group: TerminalContextMenuGroup.Create
 				}
 			},
 			{
@@ -216,7 +264,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.KillEditor,
 						title: terminalStrings.kill.value
 					},
-					group: ContextMenuGroup.Kill
+					group: TerminalContextMenuGroup.Kill
 				}
 			},
 			{
@@ -226,7 +274,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.CopySelection,
 						title: localize('workbench.action.terminal.copySelection.short', "Copy")
 					},
-					group: ContextMenuGroup.Edit,
+					group: TerminalContextMenuGroup.Edit,
 					order: 1
 				}
 			},
@@ -237,7 +285,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.CopySelectionAsHtml,
 						title: localize('workbench.action.terminal.copySelectionAsHtml', "Copy as HTML")
 					},
-					group: ContextMenuGroup.Edit,
+					group: TerminalContextMenuGroup.Edit,
 					order: 2
 				}
 			},
@@ -248,7 +296,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.Paste,
 						title: localize('workbench.action.terminal.paste.short', "Paste")
 					},
-					group: ContextMenuGroup.Edit,
+					group: TerminalContextMenuGroup.Edit,
 					order: 3
 				}
 			},
@@ -259,7 +307,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.Clear,
 						title: localize('workbench.action.terminal.clear', "Clear")
 					},
-					group: ContextMenuGroup.Clear,
+					group: TerminalContextMenuGroup.Clear,
 				}
 			},
 			{
@@ -269,8 +317,20 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.SelectAll,
 						title: localize('workbench.action.terminal.selectAll', "Select All"),
 					},
-					group: ContextMenuGroup.Edit,
+					group: TerminalContextMenuGroup.Edit,
 					order: 3
+				}
+			},
+			{
+				id: MenuId.TerminalEditorInstanceContext,
+				item: {
+					command: {
+						id: TerminalCommandId.StartVoice,
+						title: localize('workbench.action.terminal.startVoiceContext', "Start Dictation"),
+					},
+					group: TerminalContextMenuGroup.Edit,
+					order: 4,
+					when: ContextKeyExpr.and(TerminalDictationAvailable, TerminalContextKeys.terminalDictationInProgress.toNegated())
 				}
 			},
 			{
@@ -280,7 +340,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.SizeToContentWidth,
 						title: terminalStrings.toggleSizeToContentWidth
 					},
-					group: ContextMenuGroup.Config
+					group: TerminalContextMenuGroup.Config
 				}
 			}
 		]
@@ -293,9 +353,9 @@ export function setupTerminalMenus(): void {
 				item: {
 					command: {
 						id: TerminalCommandId.NewWithProfile,
-						title: localize('workbench.action.terminal.newWithProfile.short', "New Terminal With Profile")
+						title: localize('workbench.action.terminal.newWithProfile.short', "New Terminal With Profile...")
 					},
-					group: ContextMenuGroup.Create
+					group: TerminalContextMenuGroup.Create
 				}
 			},
 			{
@@ -305,7 +365,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.New,
 						title: terminalStrings.new
 					},
-					group: ContextMenuGroup.Create
+					group: TerminalContextMenuGroup.Create
 				}
 			}
 		]
@@ -318,7 +378,7 @@ export function setupTerminalMenus(): void {
 				item: {
 					command: {
 						id: TerminalCommandId.SelectDefaultProfile,
-						title: { value: localize('workbench.action.terminal.selectDefaultProfile', "Select Default Profile"), original: 'Select Default Profile' },
+						title: localize2('workbench.action.terminal.selectDefaultProfile', 'Select Default Profile'),
 					},
 					group: '3_configure'
 				}
@@ -367,7 +427,7 @@ export function setupTerminalMenus(): void {
 				item: {
 					command: {
 						id: TerminalCommandId.SwitchTerminal,
-						title: { value: localize('workbench.action.terminal.switchTerminal', "Switch Terminal"), original: 'Switch Terminal' }
+						title: localize2('workbench.action.terminal.switchTerminal', 'Switch Terminal')
 					},
 					group: 'navigation',
 					order: 0,
@@ -393,17 +453,18 @@ export function setupTerminalMenus(): void {
 					group: 'navigation',
 					order: 0,
 					when: ContextKeyExpr.and(
+						ContextKeyExpr.not(TerminalContribContextKeyStrings.ChatHasHiddenTerminals),
 						ContextKeyExpr.equals('view', TERMINAL_VIEW_ID),
 						ContextKeyExpr.has(`config.${TerminalSettingId.TabsEnabled}`),
 						ContextKeyExpr.or(
 							ContextKeyExpr.and(
 								ContextKeyExpr.equals(`config.${TerminalSettingId.TabsShowActiveTerminal}`, 'singleTerminal'),
-								ContextKeyExpr.equals(TerminalContextKeyStrings.Count, 1)
+								ContextKeyExpr.equals(TerminalContextKeyStrings.GroupCount, 1)
 							),
 							ContextKeyExpr.and(
 								ContextKeyExpr.equals(`config.${TerminalSettingId.TabsShowActiveTerminal}`, 'singleTerminalOrNarrow'),
 								ContextKeyExpr.or(
-									ContextKeyExpr.equals(TerminalContextKeyStrings.Count, 1),
+									ContextKeyExpr.equals(TerminalContextKeyStrings.GroupCount, 1),
 									ContextKeyExpr.has(TerminalContextKeyStrings.TabsNarrow)
 								)
 							),
@@ -426,29 +487,7 @@ export function setupTerminalMenus(): void {
 					},
 					group: 'navigation',
 					order: 2,
-					when: ContextKeyExpr.and(
-						ContextKeyExpr.equals('view', TERMINAL_VIEW_ID),
-						ContextKeyExpr.notEquals(`config.${TerminalSettingId.TabsHideCondition}`, 'never'),
-						ContextKeyExpr.or(
-							ContextKeyExpr.not(`config.${TerminalSettingId.TabsEnabled}`),
-							ContextKeyExpr.and(
-								ContextKeyExpr.equals(`config.${TerminalSettingId.TabsShowActions}`, 'singleTerminal'),
-								ContextKeyExpr.equals(TerminalContextKeyStrings.Count, 1)
-							),
-							ContextKeyExpr.and(
-								ContextKeyExpr.equals(`config.${TerminalSettingId.TabsShowActions}`, 'singleTerminalOrNarrow'),
-								ContextKeyExpr.or(
-									ContextKeyExpr.equals(TerminalContextKeyStrings.Count, 1),
-									ContextKeyExpr.has(TerminalContextKeyStrings.TabsNarrow)
-								)
-							),
-							ContextKeyExpr.and(
-								ContextKeyExpr.equals(`config.${TerminalSettingId.TabsShowActions}`, 'singleGroup'),
-								ContextKeyExpr.equals(TerminalContextKeyStrings.GroupCount, 1)
-							),
-							ContextKeyExpr.equals(`config.${TerminalSettingId.TabsShowActions}`, 'always')
-						)
-					)
+					when: TerminalContextKeys.shouldShowViewInlineActions
 				}
 			},
 			{
@@ -461,29 +500,7 @@ export function setupTerminalMenus(): void {
 					},
 					group: 'navigation',
 					order: 3,
-					when: ContextKeyExpr.and(
-						ContextKeyExpr.equals('view', TERMINAL_VIEW_ID),
-						ContextKeyExpr.notEquals(`config.${TerminalSettingId.TabsHideCondition}`, 'never'),
-						ContextKeyExpr.or(
-							ContextKeyExpr.not(`config.${TerminalSettingId.TabsEnabled}`),
-							ContextKeyExpr.and(
-								ContextKeyExpr.equals(`config.${TerminalSettingId.TabsShowActions}`, 'singleTerminal'),
-								ContextKeyExpr.equals(TerminalContextKeyStrings.Count, 1)
-							),
-							ContextKeyExpr.and(
-								ContextKeyExpr.equals(`config.${TerminalSettingId.TabsShowActions}`, 'singleTerminalOrNarrow'),
-								ContextKeyExpr.or(
-									ContextKeyExpr.equals(TerminalContextKeyStrings.Count, 1),
-									ContextKeyExpr.has(TerminalContextKeyStrings.TabsNarrow)
-								)
-							),
-							ContextKeyExpr.and(
-								ContextKeyExpr.equals(`config.${TerminalSettingId.TabsShowActions}`, 'singleGroup'),
-								ContextKeyExpr.equals(TerminalContextKeyStrings.GroupCount, 1)
-							),
-							ContextKeyExpr.equals(`config.${TerminalSettingId.TabsShowActions}`, 'always')
-						)
-					)
+					when: TerminalContextKeys.shouldShowViewInlineActions
 				}
 			},
 			{
@@ -515,8 +532,8 @@ export function setupTerminalMenus(): void {
 						title: localize('workbench.action.terminal.clearLong', "Clear Terminal"),
 						icon: Codicon.clearAll
 					},
-					group: 'execute',
-					order: 4,
+					group: 'navigation',
+					order: 6,
 					when: ContextKeyExpr.equals('view', TERMINAL_VIEW_ID),
 					isHiddenByDefault: true
 				}
@@ -529,8 +546,8 @@ export function setupTerminalMenus(): void {
 						title: localize('workbench.action.terminal.runActiveFile', "Run Active File"),
 						icon: Codicon.run
 					},
-					group: 'execute',
-					order: 5,
+					group: 'navigation',
+					order: 7,
 					when: ContextKeyExpr.equals('view', TERMINAL_VIEW_ID),
 					isHiddenByDefault: true
 				}
@@ -543,11 +560,37 @@ export function setupTerminalMenus(): void {
 						title: localize('workbench.action.terminal.runSelectedText', "Run Selected Text"),
 						icon: Codicon.selection
 					},
-					group: 'execute',
-					order: 6,
+					group: 'navigation',
+					order: 8,
 					when: ContextKeyExpr.equals('view', TERMINAL_VIEW_ID),
 					isHiddenByDefault: true
-				}
+				},
+			},
+			{
+				id: MenuId.ViewTitle,
+				item: {
+					command: {
+						id: TerminalCommandId.StartVoice,
+						title: localize('workbench.action.terminal.startVoice', "Start Dictation"),
+					},
+					group: 'navigation',
+					order: 9,
+					when: ContextKeyExpr.and(ContextKeyExpr.equals('view', TERMINAL_VIEW_ID), TerminalContextKeys.terminalDictationInProgress.toNegated()),
+					isHiddenByDefault: true
+				},
+			},
+			{
+				id: MenuId.ViewTitle,
+				item: {
+					command: {
+						id: TerminalCommandId.StopVoice,
+						title: localize('workbench.action.terminal.stopVoice', "Stop Dictation"),
+					},
+					group: 'navigation',
+					order: 9,
+					when: ContextKeyExpr.and(ContextKeyExpr.equals('view', TERMINAL_VIEW_ID), TerminalContextKeys.terminalDictationInProgress),
+					isHiddenByDefault: true
+				},
 			},
 		]
 	);
@@ -561,7 +604,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.SplitActiveTab,
 						title: terminalStrings.split.value,
 					},
-					group: ContextMenuGroup.Create,
+					group: TerminalContextMenuGroup.Create,
 					order: 1
 				}
 			},
@@ -572,7 +615,18 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.MoveToEditor,
 						title: terminalStrings.moveToEditor.value
 					},
-					group: ContextMenuGroup.Create,
+					group: TerminalContextMenuGroup.Create,
+					order: 2
+				}
+			},
+			{
+				id: MenuId.TerminalTabContext,
+				item: {
+					command: {
+						id: TerminalCommandId.MoveIntoNewWindow,
+						title: terminalStrings.moveIntoNewWindow.value
+					},
+					group: TerminalContextMenuGroup.Create,
 					order: 2
 				}
 			},
@@ -583,7 +637,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.RenameActiveTab,
 						title: localize('workbench.action.terminal.renameInstance', "Rename...")
 					},
-					group: ContextMenuGroup.Edit
+					group: TerminalContextMenuGroup.Edit
 				}
 			},
 			{
@@ -593,7 +647,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.ChangeIconActiveTab,
 						title: localize('workbench.action.terminal.changeIcon', "Change Icon...")
 					},
-					group: ContextMenuGroup.Edit
+					group: TerminalContextMenuGroup.Edit
 				}
 			},
 			{
@@ -603,7 +657,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.ChangeColorActiveTab,
 						title: localize('workbench.action.terminal.changeColor', "Change Color...")
 					},
-					group: ContextMenuGroup.Edit
+					group: TerminalContextMenuGroup.Edit
 				}
 			},
 			{
@@ -613,7 +667,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.SizeToContentWidth,
 						title: terminalStrings.toggleSizeToContentWidth
 					},
-					group: ContextMenuGroup.Edit
+					group: TerminalContextMenuGroup.Edit
 				}
 			},
 			{
@@ -624,7 +678,7 @@ export function setupTerminalMenus(): void {
 						title: localize('workbench.action.terminal.joinInstance', "Join Terminals")
 					},
 					when: TerminalContextKeys.tabsSingularSelection.toNegated(),
-					group: ContextMenuGroup.Config
+					group: TerminalContextMenuGroup.Config
 				}
 			},
 			{
@@ -634,8 +688,8 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.Unsplit,
 						title: terminalStrings.unsplit.value
 					},
-					when: ContextKeyExpr.and(TerminalContextKeys.tabsSingularSelection, TerminalContextKeys.splitTerminal),
-					group: ContextMenuGroup.Config
+					when: ContextKeyExpr.and(TerminalContextKeys.tabsSingularSelection, TerminalContextKeys.splitTerminalTabFocused),
+					group: TerminalContextMenuGroup.Config
 				}
 			},
 			{
@@ -645,7 +699,7 @@ export function setupTerminalMenus(): void {
 						id: TerminalCommandId.KillActiveTab,
 						title: terminalStrings.kill.value
 					},
-					group: ContextMenuGroup.Kill,
+					group: TerminalContextMenuGroup.Kill,
 				}
 			}
 		]
@@ -656,7 +710,7 @@ export function setupTerminalMenus(): void {
 			id: TerminalCommandId.MoveToTerminalPanel,
 			title: terminalStrings.moveToTerminalPanel
 		},
-		when: ResourceContextKey.Scheme.isEqualTo(Schemas.vscodeTerminal),
+		when: MoveTerminalEditorToPanelWhen,
 		group: '2_files'
 	});
 
@@ -666,7 +720,7 @@ export function setupTerminalMenus(): void {
 			title: terminalStrings.rename
 		},
 		when: ResourceContextKey.Scheme.isEqualTo(Schemas.vscodeTerminal),
-		group: '3_files'
+		group: '2_files'
 	});
 
 	MenuRegistry.appendMenuItem(MenuId.EditorTitleContext, {
@@ -675,7 +729,7 @@ export function setupTerminalMenus(): void {
 			title: terminalStrings.changeColor
 		},
 		when: ResourceContextKey.Scheme.isEqualTo(Schemas.vscodeTerminal),
-		group: '3_files'
+		group: '2_files'
 	});
 
 	MenuRegistry.appendMenuItem(MenuId.EditorTitleContext, {
@@ -684,7 +738,7 @@ export function setupTerminalMenus(): void {
 			title: terminalStrings.changeIcon
 		},
 		when: ResourceContextKey.Scheme.isEqualTo(Schemas.vscodeTerminal),
-		group: '3_files'
+		group: '2_files'
 	});
 	MenuRegistry.appendMenuItem(MenuId.EditorTitleContext, {
 		command: {
@@ -692,93 +746,228 @@ export function setupTerminalMenus(): void {
 			title: terminalStrings.toggleSizeToContentWidth
 		},
 		when: ResourceContextKey.Scheme.isEqualTo(Schemas.vscodeTerminal),
-		group: '3_files'
+		group: '2_files'
 	});
 
-	MenuRegistry.appendMenuItem(MenuId.EditorTitle, {
-		command: {
-			id: TerminalCommandId.CreateTerminalEditorSameGroup,
-			title: terminalStrings.new,
-			icon: Codicon.plus
-		},
-		alt: {
-			id: TerminalCommandId.Split,
-			title: terminalStrings.split.value,
-			icon: Codicon.splitHorizontal
-		},
-		group: 'navigation',
-		order: 0,
-		when: ResourceContextKey.Scheme.isEqualTo(Schemas.vscodeTerminal)
-	});
+	for (const menuId of [MenuId.EditorTitle, MenuId.CompactWindowEditorTitle]) {
+		MenuRegistry.appendMenuItem(menuId, {
+			command: {
+				id: TerminalCommandId.CreateTerminalEditorSameGroup,
+				title: terminalStrings.new,
+				icon: Codicon.plus
+			},
+			alt: {
+				id: TerminalCommandId.Split,
+				title: terminalStrings.split.value,
+				icon: Codicon.splitHorizontal
+			},
+			group: 'navigation',
+			order: 0,
+			when: ResourceContextKey.Scheme.isEqualTo(Schemas.vscodeTerminal)
+		});
+		MenuRegistry.appendMenuItem(menuId, {
+			command: {
+				id: TerminalCommandId.Clear,
+				title: localize('workbench.action.terminal.clearLong', "Clear Terminal"),
+				icon: Codicon.clearAll
+			},
+			group: 'navigation',
+			order: 6,
+			when: ResourceContextKey.Scheme.isEqualTo(Schemas.vscodeTerminal),
+			isHiddenByDefault: true
+		});
+		MenuRegistry.appendMenuItem(menuId, {
+			command: {
+				id: TerminalCommandId.RunActiveFile,
+				title: localize('workbench.action.terminal.runActiveFile', "Run Active File"),
+				icon: Codicon.run
+			},
+			group: 'navigation',
+			order: 7,
+			when: ResourceContextKey.Scheme.isEqualTo(Schemas.vscodeTerminal),
+			isHiddenByDefault: true
+		});
+		MenuRegistry.appendMenuItem(menuId, {
+			command: {
+				id: TerminalCommandId.RunSelectedText,
+				title: localize('workbench.action.terminal.runSelectedText', "Run Selected Text"),
+				icon: Codicon.selection
+			},
+			group: 'navigation',
+			order: 8,
+			when: ResourceContextKey.Scheme.isEqualTo(Schemas.vscodeTerminal),
+			isHiddenByDefault: true
+		});
+		MenuRegistry.appendMenuItem(menuId, {
+			command: {
+				id: TerminalCommandId.StartVoice,
+				title: localize('workbench.action.terminal.startVoiceEditor', "Start Dictation"),
+				icon: Codicon.mic
+			},
+			group: 'navigation',
+			order: 9,
+			when: ContextKeyExpr.and(ResourceContextKey.Scheme.isEqualTo(Schemas.vscodeTerminal), TerminalContextKeys.terminalDictationInProgress.negate()),
+			isHiddenByDefault: true
+		});
+		MenuRegistry.appendMenuItem(menuId, {
+			command: {
+				id: TerminalCommandId.StopVoice,
+				title: localize('workbench.action.terminal.stopVoiceEditor', "Stop Dictation"),
+				icon: Codicon.run
+			},
+			group: 'navigation',
+			order: 10,
+			when: ContextKeyExpr.and(ResourceContextKey.Scheme.isEqualTo(Schemas.vscodeTerminal), HasSpeechProvider, TerminalContextKeys.terminalDictationInProgress),
+			isHiddenByDefault: true
+		});
+	}
 }
 
-export function getTerminalActionBarArgs(location: ITerminalLocationOptions, profiles: ITerminalProfile[], defaultProfileName: string, contributedProfiles: readonly IExtensionTerminalProfile[], terminalService: ITerminalService, dropdownMenu: IMenu): {
+export function getTerminalActionBarArgs(location: ITerminalLocationOptions, profiles: ITerminalProfile[], defaultProfileName: string, contributedProfiles: readonly IExtensionTerminalProfile[], terminalService: ITerminalService, dropdownMenu: IMenu, disposableStore: DisposableStore): {
 	dropdownAction: IAction;
 	dropdownMenuActions: IAction[];
 	className: string;
 	dropdownIcon?: string;
 } {
-	let dropdownActions: IAction[] = [];
-	let submenuActions: IAction[] = [];
 	profiles = profiles.filter(e => !e.isAutoDetected);
-	const splitLocation = (location === TerminalLocation.Editor || (typeof location === 'object' && 'viewColumn' in location && location.viewColumn === ACTIVE_GROUP)) ? { viewColumn: SIDE_GROUP } : { splitActiveTerminal: true };
-	for (const p of profiles) {
-		const isDefault = p.profileName === defaultProfileName;
-		const options: ICreateTerminalOptions = { config: p, location };
-		const splitOptions: ICreateTerminalOptions = { config: p, location: splitLocation };
-		const sanitizedProfileName = p.profileName.replace(/[\n\r\t]/g, '');
-		dropdownActions.push(new Action(TerminalCommandId.NewWithProfile, isDefault ? localize('defaultTerminalProfile', "{0} (Default)", sanitizedProfileName) : sanitizedProfileName, undefined, true, async () => {
-			const instance = await terminalService.createTerminal(options);
-			terminalService.setActiveInstance(instance);
-			await terminalService.focusActiveInstance();
-		}));
-		submenuActions.push(new Action(TerminalCommandId.Split, isDefault ? localize('defaultTerminalProfile', "{0} (Default)", sanitizedProfileName) : sanitizedProfileName, undefined, true, async () => {
-			const instance = await terminalService.createTerminal(splitOptions);
-			terminalService.setActiveInstance(instance);
-			await terminalService.focusActiveInstance();
-		}));
+	const [aiProfiles, otherProfiles] = splitProfiles(profiles);
+	const [aiContributedProfiles, otherContributedProfiles] = splitContributedProfiles(contributedProfiles);
+	const dropdownActions: IAction[] = [];
+	const submenuActions: IAction[] = [];
+	const splitLocation = (location === TerminalLocation.Editor || (typeof location === 'object' && hasKey(location, { viewColumn: true }) && location.viewColumn === ACTIVE_GROUP)) ? { viewColumn: SIDE_GROUP } : { splitActiveTerminal: true };
+
+	if (location === TerminalLocation.Editor) {
+		location = { viewColumn: ACTIVE_GROUP };
 	}
 
-	for (const contributed of contributedProfiles) {
-		const isDefault = contributed.title === defaultProfileName;
-		const title = isDefault ? localize('defaultTerminalProfile', "{0} (Default)", contributed.title.replace(/[\n\r\t]/g, '')) : contributed.title.replace(/[\n\r\t]/g, '');
-		dropdownActions.push(new Action('contributed', title, undefined, true, () => terminalService.createTerminal({
-			config: {
-				extensionIdentifier: contributed.extensionIdentifier,
-				id: contributed.id,
-				title
-			},
-			location
-		})));
-		submenuActions.push(new Action('contributed-split', title, undefined, true, () => terminalService.createTerminal({
-			config: {
-				extensionIdentifier: contributed.extensionIdentifier,
-				id: contributed.id,
-				title
-			},
-			location: splitLocation
-		})));
+	dropdownActions.push(disposableStore.add(new Action(TerminalCommandId.New, terminalStrings.new, undefined, true, () => terminalService.createAndFocusTerminal())));
+	dropdownActions.push(disposableStore.add(new Action(TerminalCommandId.NewInNewWindow, terminalStrings.newInNewWindow.value, undefined, true, () => terminalService.createAndFocusTerminal({
+		location: {
+			viewColumn: AUX_WINDOW_GROUP,
+			auxiliary: { compact: true },
+		}
+	}))));
+	dropdownActions.push(disposableStore.add(new Action(TerminalCommandId.Split, terminalStrings.split.value, undefined, true, () => terminalService.createAndFocusTerminal({
+		location: splitLocation
+	}))));
+	dropdownActions.push(new Separator());
+	for (const p of aiProfiles) {
+		addProfileActions(p, defaultProfileName, location, splitLocation, terminalService, dropdownActions, submenuActions, disposableStore);
+	}
+	for (const contributed of aiContributedProfiles) {
+		addContributedProfileActions(contributed, defaultProfileName, location, splitLocation, terminalService, dropdownActions, submenuActions, disposableStore);
+	}
+	if ((aiProfiles.length > 0 || aiContributedProfiles.length > 0) && (otherProfiles.length > 0 || otherContributedProfiles.length > 0)) {
+		dropdownActions.push(new Separator());
 	}
 
-	const defaultProfileAction = dropdownActions.find(d => d.label.endsWith('(Default)'));
-	if (defaultProfileAction) {
-		dropdownActions = dropdownActions.filter(d => d !== defaultProfileAction).sort((a, b) => a.label.localeCompare(b.label));
-		dropdownActions.unshift(defaultProfileAction);
+	for (const p of otherProfiles) {
+		addProfileActions(p, defaultProfileName, location, splitLocation, terminalService, dropdownActions, submenuActions, disposableStore);
+	}
+
+	for (const contributed of otherContributedProfiles) {
+		addContributedProfileActions(contributed, defaultProfileName, location, splitLocation, terminalService, dropdownActions, submenuActions, disposableStore);
 	}
 
 	if (dropdownActions.length > 0) {
-		dropdownActions.push(new SubmenuAction('split.profile', localize('splitTerminal', 'Split Terminal'), submenuActions));
+		dropdownActions.push(new SubmenuAction('split.profile', localize('split.profile', 'Split Terminal with Profile'), submenuActions));
 		dropdownActions.push(new Separator());
 	}
 	const actions = dropdownMenu.getActions();
 	dropdownActions.push(...Separator.join(...actions.map(a => a[1])));
 
-	const defaultSubmenuProfileAction = submenuActions.find(d => d.label.endsWith('(Default)'));
-	if (defaultSubmenuProfileAction) {
-		submenuActions = submenuActions.filter(d => d !== defaultSubmenuProfileAction).sort((a, b) => a.label.localeCompare(b.label));
-		submenuActions.unshift(defaultSubmenuProfileAction);
+	const dropdownAction = disposableStore.add(new Action('refresh profiles', localize('launchProfile', 'Launch Profile...'), 'codicon-chevron-down', true));
+	return { dropdownAction, dropdownMenuActions: dropdownActions, className: `terminal-tab-actions-${terminalService.resolveLocation(location)}` };
+}
+
+function splitProfiles(profiles: readonly ITerminalProfile[]): [ITerminalProfile[], ITerminalProfile[]] {
+	const aiProfiles: ITerminalProfile[] = [];
+	const otherProfiles: ITerminalProfile[] = [];
+	for (const profile of profiles) {
+		if (isAiProfileName(profile.profileName)) {
+			aiProfiles.push(profile);
+		} else {
+			otherProfiles.push(profile);
+		}
+	}
+	return [aiProfiles, otherProfiles];
+}
+
+function splitContributedProfiles(contributedProfiles: readonly IExtensionTerminalProfile[]): [IExtensionTerminalProfile[], IExtensionTerminalProfile[]] {
+	const aiContributedProfiles: IExtensionTerminalProfile[] = [];
+	const otherContributedProfiles: IExtensionTerminalProfile[] = [];
+	for (const profile of contributedProfiles) {
+		if (isAiContributedProfile(profile)) {
+			aiContributedProfiles.push(profile);
+		} else {
+			otherContributedProfiles.push(profile);
+		}
+	}
+	return [aiContributedProfiles, otherContributedProfiles];
+}
+
+function isAiContributedProfile(profile: IExtensionTerminalProfile): boolean {
+	const extensionIdentifier = profile.extensionIdentifier.toLowerCase();
+	if (extensionIdentifier === 'github.copilot-chat' || extensionIdentifier === 'anthropic.claude-code') {
+		return true;
 	}
 
-	const dropdownAction = new Action('refresh profiles', 'Launch Profile...', 'codicon-chevron-down', true);
-	return { dropdownAction, dropdownMenuActions: dropdownActions, className: `terminal-tab-actions-${terminalService.resolveLocation(location)}` };
+	return isAiProfileName(profile.title);
+}
+
+function isAiProfileName(name: string): boolean {
+	const lowerCaseName = name.toLowerCase();
+	return lowerCaseName.includes('copilot') || lowerCaseName.includes('claude');
+}
+
+function addProfileActions(
+	profile: ITerminalProfile,
+	defaultProfileName: string,
+	location: ITerminalLocationOptions,
+	splitLocation: ITerminalLocationOptions,
+	terminalService: ITerminalService,
+	dropdownActions: IAction[],
+	submenuActions: IAction[],
+	disposableStore: DisposableStore
+): void {
+	const isDefault = profile.profileName === defaultProfileName;
+	const options: ICreateTerminalOptions = { config: profile, location };
+	const splitOptions: ICreateTerminalOptions = { config: profile, location: splitLocation };
+	const sanitizedProfileName = profile.profileName.replace(/[\n\r\t]/g, '');
+	dropdownActions.push(disposableStore.add(new Action(TerminalCommandId.NewWithProfile, isDefault ? localize('defaultTerminalProfile', "{0} (Default)", sanitizedProfileName) : sanitizedProfileName, undefined, true, async () => {
+		await terminalService.createAndFocusTerminal(options);
+	})));
+	submenuActions.push(disposableStore.add(new Action(TerminalCommandId.Split, isDefault ? localize('defaultTerminalProfile', "{0} (Default)", sanitizedProfileName) : sanitizedProfileName, undefined, true, async () => {
+		await terminalService.createAndFocusTerminal(splitOptions);
+	})));
+}
+
+function addContributedProfileActions(
+	contributed: IExtensionTerminalProfile,
+	defaultProfileName: string,
+	location: ITerminalLocationOptions,
+	splitLocation: ITerminalLocationOptions,
+	terminalService: ITerminalService,
+	dropdownActions: IAction[],
+	submenuActions: IAction[],
+	disposableStore: DisposableStore
+): void {
+	const isDefault = contributed.title === defaultProfileName;
+	const title = isDefault ? localize('defaultTerminalProfile', "{0} (Default)", contributed.title.replace(/[\n\r\t]/g, '')) : contributed.title.replace(/[\n\r\t]/g, '');
+	dropdownActions.push(disposableStore.add(new Action('contributed', title, undefined, true, () => terminalService.createAndFocusTerminal({
+		config: {
+			extensionIdentifier: contributed.extensionIdentifier,
+			id: contributed.id,
+			title
+		},
+		location
+	}))));
+	submenuActions.push(disposableStore.add(new Action('contributed-split', title, undefined, true, () => terminalService.createAndFocusTerminal({
+		config: {
+			extensionIdentifier: contributed.extensionIdentifier,
+			id: contributed.id,
+			title
+		},
+		location: splitLocation
+	}))));
 }

@@ -3,18 +3,25 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import { URI } from 'vs/base/common/uri';
-import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
-import { workbenchInstantiationService, TestServiceAccessor, ITestTextFileEditorModelManager } from 'vs/workbench/test/browser/workbenchTestServices';
-import { TextFileEditorModel } from 'vs/workbench/services/textfile/common/textFileEditorModel';
-import { FileChangesEvent, FileChangeType, FileOperationError, FileOperationResult } from 'vs/platform/files/common/files';
-import { ensureNoDisposablesAreLeakedInTestSuite, toResource } from 'vs/base/test/common/utils';
-import { PLAINTEXT_LANGUAGE_ID } from 'vs/editor/common/languages/modesRegistry';
-import { ITextFileEditorModel } from 'vs/workbench/services/textfile/common/textfiles';
-import { createTextBufferFactory } from 'vs/editor/common/model/textModel';
-import { timeout } from 'vs/base/common/async';
-import { DisposableStore, toDisposable } from 'vs/base/common/lifecycle';
+import assert from 'assert';
+import { URI } from '../../../../../base/common/uri.js';
+import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
+import { workbenchInstantiationService, TestServiceAccessor, ITestTextFileEditorModelManager } from '../../../../test/browser/workbenchTestServices.js';
+import { TextFileEditorModel } from '../../common/textFileEditorModel.js';
+import { FileChangesEvent, FileChangeType, FileOperationError, FileOperationResult } from '../../../../../platform/files/common/files.js';
+import { ensureNoDisposablesAreLeakedInTestSuite, toResource } from '../../../../../base/test/common/utils.js';
+import { PLAINTEXT_LANGUAGE_ID } from '../../../../../editor/common/languages/modesRegistry.js';
+import { ITextFileEditorModel, ITextFileService, TextFileReconcileResult } from '../../common/textfiles.js';
+import { CancellationToken } from '../../../../../base/common/cancellation.js';
+import { createTextBufferFactory } from '../../../../../editor/common/model/textModel.js';
+import { timeout } from '../../../../../base/common/async.js';
+import { DisposableStore, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { VSBuffer } from '../../../../../base/common/buffer.js';
+import { Event } from '../../../../../base/common/event.js';
+import { Schemas } from '../../../../../base/common/network.js';
+import { FileService } from '../../../../../platform/files/common/fileService.js';
+import { InMemoryFileSystemProvider } from '../../../../../platform/files/common/inMemoryFilesystemProvider.js';
+import { NullLogService } from '../../../../../platform/log/common/log.js';
 
 suite('Files - TextFileEditorModelManager', () => {
 
@@ -113,6 +120,43 @@ suite('Files - TextFileEditorModelManager', () => {
 		assert.strictEqual(events.length, 2);
 		assert.strictEqual(events[0].resource.toString(), model1.resource.toString());
 		assert.strictEqual(events[1].resource.toString(), model2.resource.toString());
+	});
+
+	test('scoped ancestor retention covers existing and subsequently opened models', async () => {
+		// TestFileService regenerates ETags on reads; reconciliation needs versions tied to writes.
+		const fileService = disposables.add(new FileService(new NullLogService()));
+		const provider = disposables.add(new class extends InMemoryFileSystemProvider {
+			override async readFile(resource: URI): Promise<Uint8Array> {
+				// Cross clock ticks instead of relying on two reads finishing in the same millisecond.
+				await timeout(2);
+				return super.readFile(resource);
+			}
+		}());
+		disposables.add(fileService.registerProvider(Schemas.file, provider));
+		const existingResource = URI.file('/existing.txt');
+		const futureResource = URI.file('/future.txt');
+		const content = 'Hello Html';
+		const initialized = Event.toPromise(Event.filter(fileService.onDidFilesChange, event => event.contains(futureResource, FileChangeType.ADDED)));
+		await Promise.all([existingResource, futureResource].map(resource => fileService.writeFile(resource, VSBuffer.fromString(content))));
+		await initialized;
+		const services = disposables.add(workbenchInstantiationService({ fileService: () => fileService }, disposables));
+		const manager = services.get(ITextFileService).files;
+		const existing = disposables.add(await manager.resolve(existingResource));
+		assert.ok(existing instanceof TextFileEditorModel);
+		const disabled = await existing.reconcileExternalChanges(content, CancellationToken.None);
+		const first = disposables.add(manager.retainResolvedContent());
+		const second = disposables.add(manager.retainResolvedContent());
+		const future = disposables.add(await manager.resolve(futureResource));
+		assert.ok(future instanceof TextFileEditorModel);
+		const whileRetained = await Promise.all([existing, future].map(model => model.reconcileExternalChanges(content, CancellationToken.None)));
+		first.dispose();
+		const afterFirstRelease = await Promise.all([existing, future].map(model => model.reconcileExternalChanges(content, CancellationToken.None)));
+		second.dispose();
+		const afterRelease = await Promise.all([existing, future].map(model => model.reconcileExternalChanges(content, CancellationToken.None)));
+		assert.deepStrictEqual({ disabled, whileRetained, afterFirstRelease, afterRelease }, {
+			disabled: TextFileReconcileResult.Unavailable, whileRetained: [TextFileReconcileResult.Reconciled, TextFileReconcileResult.Reconciled],
+			afterFirstRelease: [TextFileReconcileResult.Reconciled, TextFileReconcileResult.Reconciled], afterRelease: [TextFileReconcileResult.Unavailable, TextFileReconcileResult.Unavailable],
+		});
 	});
 
 	test('resolve (async)', async () => {

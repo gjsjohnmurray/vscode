@@ -3,13 +3,13 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { VSBuffer } from 'vs/base/common/buffer';
-import { CancellationToken } from 'vs/base/common/cancellation';
-import { canceled } from 'vs/base/common/errors';
-import { IDataTransformer, IErrorTransformer, WriteableStream } from 'vs/base/common/stream';
-import { URI } from 'vs/base/common/uri';
-import { localize } from 'vs/nls';
-import { createFileSystemProviderError, ensureFileSystemProviderError, IFileReadStreamOptions, FileSystemProviderErrorCode, IFileSystemProviderWithOpenReadWriteCloseCapability } from 'vs/platform/files/common/files';
+import { VSBuffer } from '../../../base/common/buffer.js';
+import { CancellationToken } from '../../../base/common/cancellation.js';
+import { canceled } from '../../../base/common/errors.js';
+import { IDataTransformer, IErrorTransformer, WriteableStream } from '../../../base/common/stream.js';
+import { URI } from '../../../base/common/uri.js';
+import { localize } from '../../../nls.js';
+import { createFileSystemProviderError, ensureFileSystemProviderError, IFileReadStreamOptions, FileSystemProviderErrorCode, IFileSystemProviderWithOpenReadWriteCloseCapability } from './files.js';
 
 export interface ICreateReadStreamOptions extends IFileReadStreamOptions {
 
@@ -28,7 +28,7 @@ export interface ICreateReadStreamOptions extends IFileReadStreamOptions {
  * A helper to read a file from a provider with open/read/close capability into a stream.
  */
 export async function readFileIntoStream<T>(
-	provider: IFileSystemProviderWithOpenReadWriteCloseCapability,
+	provider: Pick<IFileSystemProviderWithOpenReadWriteCloseCapability, 'open' | 'read' | 'close'>,
 	resource: URI,
 	target: WriteableStream<T>,
 	transformer: IDataTransformer<VSBuffer, T>,
@@ -54,7 +54,7 @@ export async function readFileIntoStream<T>(
 	}
 }
 
-async function doReadFileIntoStream<T>(provider: IFileSystemProviderWithOpenReadWriteCloseCapability, resource: URI, target: WriteableStream<T>, transformer: IDataTransformer<VSBuffer, T>, options: ICreateReadStreamOptions, token: CancellationToken): Promise<void> {
+async function doReadFileIntoStream<T>(provider: Pick<IFileSystemProviderWithOpenReadWriteCloseCapability, 'open' | 'read' | 'close'>, resource: URI, target: WriteableStream<T>, transformer: IDataTransformer<VSBuffer, T>, options: ICreateReadStreamOptions, token: CancellationToken): Promise<void> {
 
 	// Check for cancellation
 	throwIfCancelled(token);
@@ -98,14 +98,9 @@ async function doReadFileIntoStream<T>(provider: IFileSystemProviderWithOpenRead
 			}
 		} while (bytesRead > 0 && (typeof allowedRemainingBytes !== 'number' || allowedRemainingBytes > 0) && throwIfCancelled(token) && throwIfTooLarge(totalBytesRead, options));
 
-		// wrap up with last buffer (also respect maxBytes if provided)
+		// wrap up with last buffer, which is only partially filled
 		if (posInBuffer > 0) {
-			let lastChunkLength = posInBuffer;
-			if (typeof allowedRemainingBytes === 'number') {
-				lastChunkLength = Math.min(posInBuffer, allowedRemainingBytes);
-			}
-
-			target.write(transformer(buffer.slice(0, lastChunkLength)));
+			target.write(transformer(buffer.slice(0, posInBuffer)));
 		}
 	} catch (error) {
 		throw ensureFileSystemProviderError(error);

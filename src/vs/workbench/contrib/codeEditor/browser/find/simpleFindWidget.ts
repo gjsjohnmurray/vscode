@@ -3,28 +3,33 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import 'vs/css!./simpleFindWidget';
-import * as nls from 'vs/nls';
-import * as dom from 'vs/base/browser/dom';
-import { FindInput } from 'vs/base/browser/ui/findinput/findInput';
-import { Widget } from 'vs/base/browser/ui/widget';
-import { Delayer } from 'vs/base/common/async';
-import { KeyCode } from 'vs/base/common/keyCodes';
-import { FindReplaceState, INewFindReplaceState } from 'vs/editor/contrib/find/browser/findState';
-import { IMessage as InputBoxMessage } from 'vs/base/browser/ui/inputbox/inputBox';
-import { SimpleButton, findPreviousMatchIcon, findNextMatchIcon, NLS_NO_RESULTS, NLS_MATCHES_LOCATION } from 'vs/editor/contrib/find/browser/findWidget';
-import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
-import { IContextViewService } from 'vs/platform/contextview/browser/contextView';
-import { ContextScopedFindInput } from 'vs/platform/history/browser/contextScopedHistoryWidget';
-import { widgetClose } from 'vs/platform/theme/common/iconRegistry';
-import { registerThemingParticipant } from 'vs/platform/theme/common/themeService';
-import * as strings from 'vs/base/common/strings';
-import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
-import { showHistoryKeybindingHint } from 'vs/platform/history/browser/historyWidgetKeybindingHint';
-import { status } from 'vs/base/browser/ui/aria/aria';
-import { defaultInputBoxStyles, defaultToggleStyles } from 'vs/platform/theme/browser/defaultStyles';
-import { ISashEvent, IVerticalSashLayoutProvider, Orientation, Sash } from 'vs/base/browser/ui/sash/sash';
-import { registerColor } from 'vs/platform/theme/common/colorRegistry';
+import './simpleFindWidget.css';
+import * as nls from '../../../../../nls.js';
+import * as dom from '../../../../../base/browser/dom.js';
+import { FindInput } from '../../../../../base/browser/ui/findinput/findInput.js';
+import { Widget } from '../../../../../base/browser/ui/widget.js';
+import { Delayer, disposableTimeout, TimeoutTimer } from '../../../../../base/common/async.js';
+import { KeyCode } from '../../../../../base/common/keyCodes.js';
+import { IDisposable } from '../../../../../base/common/lifecycle.js';
+import { FindReplaceState, INewFindReplaceState } from '../../../../../editor/contrib/find/browser/findState.js';
+import { IMessage as InputBoxMessage } from '../../../../../base/browser/ui/inputbox/inputBox.js';
+import { SimpleButton, findPreviousMatchIcon, findNextMatchIcon, NLS_NO_RESULTS, NLS_MATCHES_LOCATION } from '../../../../../editor/contrib/find/browser/findWidget.js';
+import { IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
+import { IContextViewService } from '../../../../../platform/contextview/browser/contextView.js';
+import { ContextScopedFindInput } from '../../../../../platform/history/browser/contextScopedHistoryWidget.js';
+import { widgetClose } from '../../../../../platform/theme/common/iconRegistry.js';
+import { registerThemingParticipant } from '../../../../../platform/theme/common/themeService.js';
+import * as strings from '../../../../../base/common/strings.js';
+import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
+import { showHistoryKeybindingHint } from '../../../../../platform/history/browser/historyWidgetKeybindingHint.js';
+import { status } from '../../../../../base/browser/ui/aria/aria.js';
+import { defaultInputBoxStyles, defaultToggleStyles } from '../../../../../platform/theme/browser/defaultStyles.js';
+import { ISashEvent, IVerticalSashLayoutProvider, Orientation, Sash } from '../../../../../base/browser/ui/sash/sash.js';
+import { registerColor } from '../../../../../platform/theme/common/colorRegistry.js';
+import type { IHoverService } from '../../../../../platform/hover/browser/hover.js';
+import type { IHoverLifecycleOptions } from '../../../../../base/browser/ui/hover/hover.js';
+import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { IAccessibilityService } from '../../../../../platform/accessibility/common/accessibility.js';
 
 const NLS_FIND_INPUT_LABEL = nls.localize('label.find', "Find");
 const NLS_FIND_INPUT_PLACEHOLDER = nls.localize('placeholder.find', "Find");
@@ -51,6 +56,14 @@ interface IFindOptions {
 const SIMPLE_FIND_WIDGET_INITIAL_WIDTH = 310;
 const MATCHES_COUNT_WIDTH = 73;
 
+export interface ISimpleFindResultCount {
+	readonly resultIndex: number;
+	readonly resultCount: number;
+	readonly incomplete?: boolean;
+	readonly status?: string;
+	readonly canRetry?: boolean;
+}
+
 export abstract class SimpleFindWidget extends Widget implements IVerticalSashLayoutProvider {
 	private readonly _findInput: FindInput;
 	private readonly _domNode: HTMLElement;
@@ -62,21 +75,35 @@ export abstract class SimpleFindWidget extends Widget implements IVerticalSashLa
 	private readonly nextBtn: SimpleButton;
 	private readonly _matchesLimit: number;
 	private _matchesCount: HTMLElement | undefined;
+	private _countRequest = 0;
+	private readonly _visibilityTimer = this._register(new TimeoutTimer());
 
 	private _isVisible: boolean = false;
 	private _foundMatch: boolean = false;
 	private _width: number = 0;
 
-	readonly state: FindReplaceState = new FindReplaceState();
+	/**
+	 * Tracks whether the accessibility help hint has been announced in the ARIA label.
+	 * Reset to false when the widget is hidden, allowing the hint to be announced again
+	 * on the next reveal.
+	 */
+	private _accessibilityHelpHintAnnounced: boolean = false;
+	private _labelResetTimeout: IDisposable | undefined;
+
+	readonly state: FindReplaceState;
 
 	constructor(
 		options: IFindOptions,
 		contextViewService: IContextViewService,
 		contextKeyService: IContextKeyService,
-		private readonly _keybindingService: IKeybindingService
+		hoverService: IHoverService,
+		private readonly _keybindingService: IKeybindingService,
+		private readonly _configurationService: IConfigurationService,
+		private readonly _accessibilityService: IAccessibilityService,
 	) {
 		super();
 
+		this.state = this._register(new FindReplaceState());
 		this._matchesLimit = options.matchesLimit ?? Number.MAX_SAFE_INTEGER;
 
 		this._findInput = this._register(new ContextScopedFindInput(null, contextViewService, {
@@ -104,17 +131,23 @@ export abstract class SimpleFindWidget extends Widget implements IVerticalSashLa
 			toggleStyles: defaultToggleStyles
 		}, contextKeyService));
 		// Find History with update delayer
-		this._updateHistoryDelayer = new Delayer<void>(500);
+		this._updateHistoryDelayer = this._register(new Delayer<void>(500));
 
 		this._register(this._findInput.onInput(async (e) => {
 			if (!options.checkImeCompletionState || !this._findInput.isImeSessionInProgress) {
 				this._foundMatch = this._onInputChanged();
+				if (!this._isVisible) {
+					return;
+				}
+				if (!options.checkImeCompletionState || !e.fromCompositionEnd) {
+					this.focusFindBox();
+				}
+				this._delayedUpdateHistory();
 				if (options.showResultCount) {
 					await this.updateResultCount();
+				} else {
+					this.updateButtons(this._foundMatch);
 				}
-				this.updateButtons(this._foundMatch);
-				this.focusFindBox();
-				this._delayedUpdateHistory();
 			}
 		}));
 
@@ -137,29 +170,34 @@ export abstract class SimpleFindWidget extends Widget implements IVerticalSashLa
 			this.findFirst();
 		}));
 
+		const hoverLifecycleOptions: IHoverLifecycleOptions = { groupId: 'simple-find-widget' };
+
 		this.prevBtn = this._register(new SimpleButton({
 			label: NLS_PREVIOUS_MATCH_BTN_LABEL + (options.previousMatchActionId ? this._getKeybinding(options.previousMatchActionId) : ''),
 			icon: findPreviousMatchIcon,
+			hoverLifecycleOptions,
 			onTrigger: () => {
 				this.find(true);
 			}
-		}));
+		}, hoverService));
 
 		this.nextBtn = this._register(new SimpleButton({
 			label: NLS_NEXT_MATCH_BTN_LABEL + (options.nextMatchActionId ? this._getKeybinding(options.nextMatchActionId) : ''),
 			icon: findNextMatchIcon,
+			hoverLifecycleOptions,
 			onTrigger: () => {
 				this.find(false);
 			}
-		}));
+		}, hoverService));
 
 		const closeBtn = this._register(new SimpleButton({
 			label: NLS_CLOSE_BTN_LABEL + (options.closeWidgetActionId ? this._getKeybinding(options.closeWidgetActionId) : ''),
 			icon: widgetClose,
+			hoverLifecycleOptions,
 			onTrigger: () => {
 				this.hide();
 			}
-		}));
+		}, hoverService));
 
 		this._innerDomNode = document.createElement('div');
 		this._innerDomNode.classList.add('simple-find-part');
@@ -203,9 +241,12 @@ export abstract class SimpleFindWidget extends Widget implements IVerticalSashLa
 			}));
 			this._register(this._findInput.onDidOptionChange(async () => {
 				this._foundMatch = this._onInputChanged();
-				await this.updateResultCount();
+				if (!this._isVisible) {
+					return;
+				}
 				this.focusFindBox();
 				this._delayedUpdateHistory();
+				await this.updateResultCount();
 			}));
 		}
 
@@ -220,7 +261,7 @@ export abstract class SimpleFindWidget extends Widget implements IVerticalSashLa
 			let originalWidth = _initialMinWidth;
 
 			// sash
-			const resizeSash = new Sash(this._innerDomNode, this, { orientation: Orientation.VERTICAL, size: 1 });
+			const resizeSash = this._register(new Sash(this._innerDomNode, this, { orientation: Orientation.VERTICAL, size: 1 }));
 			this._register(resizeSash.onDidStart(() => {
 				originalWidth = parseFloat(dom.getComputedStyle(this._domNode).width);
 			}));
@@ -255,7 +296,7 @@ export abstract class SimpleFindWidget extends Widget implements IVerticalSashLa
 	protected abstract _onFocusTrackerBlur(): void;
 	protected abstract _onFindInputFocusTrackerFocus(): void;
 	protected abstract _onFindInputFocusTrackerBlur(): void;
-	protected abstract _getResultCount(): Promise<{ resultIndex: number; resultCount: number } | undefined>;
+	protected abstract _getResultCount(): Promise<ISimpleFindResultCount | undefined>;
 
 	protected get inputValue() {
 		return this._findInput.getValue();
@@ -266,19 +307,14 @@ export abstract class SimpleFindWidget extends Widget implements IVerticalSashLa
 	}
 
 	private _getKeybinding(actionId: string): string {
-		const kb = this._keybindingService?.lookupKeybinding(actionId);
-		if (!kb) {
-			return '';
-		}
-		return ` (${kb.getLabel()})`;
+		return this._keybindingService.appendKeybinding('', actionId);
 	}
 
 	override dispose() {
+		this._isVisible = false;
 		super.dispose();
 
-		if (this._domNode && this._domNode.parentElement) {
-			this._domNode.parentElement.removeChild(this._domNode);
-		}
+		this._domNode?.remove();
 	}
 
 	public isVisible(): boolean {
@@ -304,17 +340,18 @@ export abstract class SimpleFindWidget extends Widget implements IVerticalSashLa
 		}
 
 		this._isVisible = true;
+		this._updateFindInputAriaLabel();
 		this.updateResultCount();
 		this.layout();
 
-		setTimeout(() => {
+		this._visibilityTimer.cancelAndSet(() => {
 			this._innerDomNode.classList.toggle('suppress-transition', !animated);
 			this._innerDomNode.classList.add('visible', 'visible-transition');
 			this._innerDomNode.setAttribute('aria-hidden', 'false');
 			this._findInput.select();
 
 			if (!animated) {
-				setTimeout(() => {
+				this._visibilityTimer.cancelAndSet(() => {
 					this._innerDomNode.classList.remove('suppress-transition');
 				}, 0);
 			}
@@ -329,7 +366,8 @@ export abstract class SimpleFindWidget extends Widget implements IVerticalSashLa
 		this._isVisible = true;
 		this.layout();
 
-		setTimeout(() => {
+		this._visibilityTimer.cancelAndSet(() => {
+			this._innerDomNode.classList.remove('suppress-transition');
 			this._innerDomNode.classList.add('visible', 'visible-transition');
 
 			this._innerDomNode.setAttribute('aria-hidden', 'false');
@@ -338,12 +376,15 @@ export abstract class SimpleFindWidget extends Widget implements IVerticalSashLa
 
 	public hide(animated = true): void {
 		if (this._isVisible) {
+			this._isVisible = false;
+			this._countRequest++;
+			// Reset the accessibility help hint flag so it can be announced again on next reveal
+			this._accessibilityHelpHintAnnounced = false;
 			this._innerDomNode.classList.toggle('suppress-transition', !animated);
 			this._innerDomNode.classList.remove('visible-transition');
 			this._innerDomNode.setAttribute('aria-hidden', 'true');
 			// Need to delay toggling visibility until after Transition, then visibility hidden - removes from tabIndex list
-			setTimeout(() => {
-				this._isVisible = false;
+			this._visibilityTimer.cancelAndSet(() => {
 				this.updateButtons(this._foundMatch);
 				this._innerDomNode.classList.remove('visible', 'suppress-transition');
 			}, animated ? 200 : 0);
@@ -393,6 +434,9 @@ export abstract class SimpleFindWidget extends Widget implements IVerticalSashLa
 	}
 
 	protected focusFindBox() {
+		if (this._findInput.isImeSessionInProgress) {
+			return;
+		}
 		// Focus back onto the find box, which
 		// requires focusing onto the next button first
 		this.nextBtn.focus();
@@ -400,19 +444,28 @@ export abstract class SimpleFindWidget extends Widget implements IVerticalSashLa
 	}
 
 	async updateResultCount(): Promise<void> {
+		if (!this._isVisible) {
+			return;
+		}
 		if (!this._matchesCount) {
 			this.updateButtons(this._foundMatch);
 			return;
 		}
 
+		const request = ++this._countRequest;
 		const count = await this._getResultCount();
-		this._matchesCount.innerText = '';
-		const showRedOutline = (this.inputValue.length > 0 && count?.resultCount === 0);
+		if (request !== this._countRequest || !this._isVisible) {
+			return;
+		}
+		this._matchesCount.textContent = '';
+		const showRedOutline = (this.inputValue.length > 0 && count?.resultCount === 0 && !count.incomplete);
 		this._matchesCount.classList.toggle('no-results', showRedOutline);
 		let label = '';
-		if (count?.resultCount) {
+		if (count?.status) {
+			label = count.status;
+		} else if (count?.resultCount) {
 			let matchesCount: string = String(count.resultCount);
-			if (count.resultCount >= this._matchesLimit) {
+			if (count.incomplete || count.resultCount >= this._matchesLimit) {
 				matchesCount += '+';
 			}
 			let matchesPosition: string = String(count.resultIndex + 1);
@@ -423,14 +476,47 @@ export abstract class SimpleFindWidget extends Widget implements IVerticalSashLa
 		} else {
 			label = NLS_NO_RESULTS;
 		}
-		status(this._announceSearchResults(label, this.inputValue));
+		const partialCount = count?.incomplete && count.resultCount > 0
+			? nls.localize('ariaPartialSearchCount', "Match {0} of at least {1} for '{2}'", count.resultIndex + 1, count.resultCount, this.inputValue)
+			: undefined;
+		status(count?.status ?? partialCount ?? this._announceSearchResults(label, this.inputValue));
 		this._matchesCount.appendChild(document.createTextNode(label));
-		this._foundMatch = !!count && count.resultCount > 0;
+		this._foundMatch = !!count && (count.resultCount > 0 || !!count.canRetry);
 		this.updateButtons(this._foundMatch);
 	}
 
 	changeState(state: INewFindReplaceState) {
 		this.state.change(state, false);
+	}
+
+	/**
+	 * Updates the ARIA label of the find input box.
+	 * When a screen reader is active and the accessibility verbosity setting is enabled,
+	 * includes a hint about pressing Alt+F1 for accessibility help on first reveal.
+	 * The hint is only announced once per show/hide cycle to prevent double-speak.
+	 */
+	private _updateFindInputAriaLabel(): void {
+		let findLabel = NLS_FIND_INPUT_LABEL;
+
+		// Include accessibility help hint on first reveal when screen reader is active
+		// Note: Using raw string for setting ID - this setting may not be registered yet
+		if (!this._accessibilityHelpHintAnnounced && this._configurationService.getValue('accessibility.verbosity.find') && this._accessibilityService.isScreenReaderOptimized()) {
+			const keybinding = this._keybindingService.lookupKeybinding('editor.action.accessibilityHelp')?.getAriaLabel();
+			if (keybinding) {
+				findLabel += ', ' + nls.localize('accessibilityHelpHintInLabel', "Press {0} for accessibility help", keybinding);
+				this._accessibilityHelpHintAnnounced = true;
+
+				// Reset to plain label after delay to avoid repeated announcement on focus changes
+				this._labelResetTimeout?.dispose();
+				this._labelResetTimeout = disposableTimeout(() => {
+					if (this._isVisible) {
+						this._findInput.inputBox.setAriaLabel(NLS_FIND_INPUT_LABEL);
+					}
+				}, 1000);
+			}
+		}
+
+		this._findInput.inputBox.setAriaLabel(findLabel);
 	}
 
 	private _announceSearchResults(label: string, searchString?: string): string {

@@ -2,17 +2,18 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import * as assert from 'assert';
-import { Disposable } from 'vs/base/common/lifecycle';
-import { URI } from 'vs/base/common/uri';
-import { ensureNoDisposablesAreLeakedInTestSuite } from 'vs/base/test/common/utils';
-import { OpenerService } from 'vs/editor/browser/services/openerService';
-import { TestCodeEditorService } from 'vs/editor/test/browser/editorTestServices';
-import { CommandsRegistry, ICommandService } from 'vs/platform/commands/common/commands';
-import { NullCommandService } from 'vs/platform/commands/test/common/nullCommandService';
-import { ITextEditorOptions } from 'vs/platform/editor/common/editor';
-import { matchesScheme, matchesSomeScheme } from 'vs/platform/opener/common/opener';
-import { TestThemeService } from 'vs/platform/theme/test/common/testThemeService';
+import assert from 'assert';
+import { Disposable } from '../../../../base/common/lifecycle.js';
+import { URI } from '../../../../base/common/uri.js';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
+import { OpenerService } from '../../../browser/services/openerService.js';
+import { TestCodeEditorService } from '../editorTestServices.js';
+import { CommandsRegistry, ICommandService } from '../../../../platform/commands/common/commands.js';
+import { NullCommandService } from '../../../../platform/commands/test/common/nullCommandService.js';
+import { ITextEditorOptions, ViewColumn } from '../../../../platform/editor/common/editor.js';
+import { matchesScheme, matchesSomeScheme } from '../../../../base/common/network.js';
+import { TestThemeService } from '../../../../platform/theme/test/common/testThemeService.js';
+import { defaultExternalUriOpenerId, IExternalOpener } from '../../../../platform/opener/common/opener.js';
 
 suite('OpenerService', function () {
 	const themeService = new TestThemeService();
@@ -24,7 +25,7 @@ suite('OpenerService', function () {
 		declare readonly _serviceBrand: undefined;
 		onWillExecuteCommand = () => Disposable.None;
 		onDidExecuteCommand = () => Disposable.None;
-		executeCommand(id: string, ...args: any[]): Promise<any> {
+		executeCommand(id: string, ...args: unknown[]): Promise<any> {
 			lastCommand = { id, args };
 			return Promise.resolve(undefined);
 		}
@@ -149,6 +150,282 @@ suite('OpenerService', function () {
 		assert.strictEqual(openCount, 1);
 		await openerService.open(URI.parse('https://microsoft.com'));
 		assert.strictEqual(openCount, 2);
+	});
+
+	test('contributed external URI openers run before validators', async function () {
+		const openerService = new OpenerService(editorService, commandService);
+		const sourceUri = URI.parse('https://source.example.com');
+		const resolvedUri = URI.parse('https://resolved.example.com');
+		const calls: string[] = [];
+
+		store.add(openerService.registerExternalUriResolver({
+			async resolveExternalUri() {
+				calls.push('resolve');
+				return { resolved: resolvedUri, dispose() { } };
+			}
+		}));
+		store.add(openerService.registerOpener({
+			async open() {
+				calls.push('opener');
+				return false;
+			}
+		}));
+		store.add(openerService.registerValidator({
+			shouldOpen() {
+				calls.push('validate');
+				return Promise.resolve(false);
+			}
+		}));
+		store.add(openerService.registerExternalOpener({
+			async openExternal(href, context) {
+				calls.push(`contributed:${href}:${context.sourceUri.toString()}`);
+				return true;
+			}
+		}));
+
+		const didOpen = await openerService.open(sourceUri, { openExternal: true, allowContributedOpeners: true });
+
+		assert.deepStrictEqual({
+			didOpen,
+			calls,
+		}, {
+			didOpen: true,
+			calls: [
+				'resolve',
+				`contributed:${resolvedUri.toString()}:${sourceUri.toString()}`,
+			],
+		});
+	});
+
+	test('external URI opener contexts normalize placement without forwarding openToSide, and carry the window the link was activated in', async () => {
+		const openerService = new OpenerService(editorService, commandService);
+		const sourceUri = URI.parse('https://source.example.com');
+		const contexts: Parameters<IExternalOpener['openExternal']>[1][] = [];
+		store.add(openerService.registerExternalOpener({
+			async openExternal(_href, context) {
+				contexts.push(context);
+				return true;
+			}
+		}));
+
+		for (const options of [
+			{ openToSide: true },
+			{ openToSide: false },
+			{},
+			{ sourceWindowId: 7 },
+		]) {
+			await openerService.open(sourceUri, { ...options, allowContributedOpeners: true });
+		}
+
+		assert.deepStrictEqual(contexts, [
+			{ sourceUri, sourceHref: sourceUri.toString(), preferredOpenerId: undefined, viewColumn: ViewColumn.Beside, sourceWindowId: undefined },
+			{ sourceUri, sourceHref: sourceUri.toString(), preferredOpenerId: undefined, viewColumn: undefined, sourceWindowId: undefined },
+			{ sourceUri, sourceHref: sourceUri.toString(), preferredOpenerId: undefined, viewColumn: undefined, sourceWindowId: undefined },
+			{ sourceUri, sourceHref: sourceUri.toString(), preferredOpenerId: undefined, viewColumn: undefined, sourceWindowId: 7 },
+		]);
+	});
+
+	test('external URI openers receive the original URL before port forwarding', async () => {
+		const openerService = new OpenerService(editorService, commandService);
+		const sourceHref = 'http://localhost:3000/a%2Fb?q=hi&value=a%26b%3Dc&space=a%20b#part%23one';
+		const forwardedUri = URI.parse('http://127.0.0.1:4000/forwarded');
+		const opened: { href: string; sourceHref: string }[] = [];
+		store.add(openerService.registerExternalUriResolver({
+			async resolveExternalUri() {
+				return { resolved: forwardedUri, dispose() { } };
+			}
+		}));
+		const opener: IExternalOpener = {
+			async openExternal(href, context) {
+				opened.push({ href, sourceHref: context.sourceHref });
+				return true;
+			}
+		};
+		store.add(openerService.registerExternalOpener(opener));
+		openerService.setDefaultExternalOpener(opener);
+
+		await openerService.open(sourceHref, { allowContributedOpeners: true });
+		await openerService.open(sourceHref);
+		await openerService.open(URI.parse('http://localhost:3000/?q=hi'), { allowContributedOpeners: true });
+		await openerService.open(URI.parse('http://localhost:3000/a%23b%3Fc?q=hi'), { allowContributedOpeners: true });
+
+		assert.deepStrictEqual(opened, [
+			{ href: forwardedUri.toString(), sourceHref },
+			{ href: forwardedUri.toString(), sourceHref },
+			{ href: forwardedUri.toString(), sourceHref: 'http://localhost:3000/?q=hi' },
+			{ href: forwardedUri.toString(), sourceHref: 'http://localhost:3000/a%23b%3Fc?q=hi' },
+		]);
+	});
+
+	test('external URI fallback validates the resolved URI', async function () {
+		const openerService = new OpenerService(editorService, commandService);
+		const sourceUri = URI.parse('https://source.example.com');
+		const resolvedUri = URI.parse('https://resolved.example.com');
+		const calls: string[] = [];
+
+		store.add(openerService.registerExternalUriResolver({
+			async resolveExternalUri() {
+				calls.push('resolve');
+				return { resolved: resolvedUri, dispose() { } };
+			}
+		}));
+		store.add(openerService.registerExternalOpener({
+			async openExternal(href, context) {
+				calls.push(`contributed:${href}:${context.sourceUri.toString()}`);
+				return false;
+			}
+		}));
+		store.add(openerService.registerValidator({
+			shouldOpen(resource) {
+				calls.push(`validate:${resource.toString()}`);
+				return Promise.resolve(false);
+			}
+		}));
+		store.add(openerService.registerOpener({
+			async open() {
+				calls.push('opener');
+				return true;
+			}
+		}));
+		openerService.setDefaultExternalOpener({
+			async openExternal(href) {
+				calls.push(`default:${href}`);
+				return true;
+			}
+		});
+
+		const didOpen = await openerService.open(sourceUri, { openExternal: true, allowContributedOpeners: true });
+
+		assert.deepStrictEqual({
+			didOpen,
+			calls,
+		}, {
+			didOpen: false,
+			calls: [
+				'resolve',
+				`contributed:${resolvedUri.toString()}:${sourceUri.toString()}`,
+				`validate:${resolvedUri.toString()}`,
+			],
+		});
+	});
+
+	test('default external URI opener validates before regular openers', async function () {
+		const openerService = new OpenerService(editorService, commandService);
+		const sourceUri = URI.parse('https://source.example.com');
+		const calls: string[] = [];
+
+		store.add(openerService.registerExternalOpener({
+			async openExternal() {
+				calls.push('contributed');
+				return true;
+			}
+		}));
+		store.add(openerService.registerValidator({
+			shouldOpen(resource) {
+				calls.push(`validate:${resource.toString()}`);
+				return Promise.resolve(false);
+			}
+		}));
+		store.add(openerService.registerOpener({
+			async open() {
+				calls.push('opener');
+				return true;
+			}
+		}));
+
+		const didOpen = await openerService.open(sourceUri, { openExternal: true, allowContributedOpeners: defaultExternalUriOpenerId });
+
+		assert.deepStrictEqual({
+			didOpen,
+			calls,
+		}, {
+			didOpen: false,
+			calls: [`validate:${sourceUri.toString()}`],
+		});
+	});
+
+	test('default external URI opener skips contributed openers', async function () {
+		const openerService = new OpenerService(editorService, commandService);
+		const sourceUri = URI.parse('https://source.example.com');
+		const calls: string[] = [];
+
+		store.add(openerService.registerExternalOpener({
+			async openExternal() {
+				calls.push('contributed');
+				return true;
+			}
+		}));
+		store.add(openerService.registerValidator({
+			shouldOpen(resource) {
+				calls.push(`validate:${resource.toString()}`);
+				return Promise.resolve(true);
+			}
+		}));
+		store.add(openerService.registerOpener({
+			async open() {
+				calls.push('opener');
+				return false;
+			}
+		}));
+		openerService.setDefaultExternalOpener({
+			async openExternal(href) {
+				calls.push(`default:${href}`);
+				return true;
+			}
+		});
+
+		const didOpen = await openerService.open(sourceUri, { openExternal: true, allowContributedOpeners: defaultExternalUriOpenerId });
+
+		assert.deepStrictEqual({
+			didOpen,
+			calls,
+		}, {
+			didOpen: true,
+			calls: [
+				`validate:${sourceUri.toString()}`,
+				'opener',
+				`default:${sourceUri.toString()}`,
+			],
+		});
+	});
+
+	test('external URI fallback preserves strings for validation and opening', async function () {
+		const openerService = new OpenerService(editorService, commandService);
+		const source = 'https://source.example.com/path?value=%2B';
+		const calls: string[] = [];
+
+		store.add(openerService.registerExternalOpener({
+			async openExternal() {
+				calls.push('contributed');
+				return false;
+			}
+		}));
+		store.add(openerService.registerValidator({
+			shouldOpen(resource) {
+				calls.push(`validate:${resource.toString()}`);
+				return Promise.resolve(true);
+			}
+		}));
+		openerService.setDefaultExternalOpener({
+			async openExternal(href) {
+				calls.push(`default:${href}`);
+				return true;
+			}
+		});
+
+		const didOpen = await openerService.open(source, { openExternal: true, allowContributedOpeners: true });
+
+		assert.deepStrictEqual({
+			didOpen,
+			calls,
+		}, {
+			didOpen: true,
+			calls: [
+				'contributed',
+				`validate:${source}`,
+				`default:${source}`,
+			],
+		});
 	});
 
 	test('links aren\'t manipulated before being passed to validator: PR #118226', async function () {

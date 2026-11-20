@@ -3,60 +3,65 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import 'vs/css!./media/multieditortabscontrol';
-import { isMacintosh, isWindows } from 'vs/base/common/platform';
-import { shorten } from 'vs/base/common/labels';
-import { EditorResourceAccessor, Verbosity, IEditorPartOptions, SideBySideEditor, DEFAULT_EDITOR_ASSOCIATION, EditorInputCapabilities, IUntypedEditorInput, preventEditorClose, EditorCloseMethod, EditorsOrder, IToolbarActions } from 'vs/workbench/common/editor';
-import { EditorInput } from 'vs/workbench/common/editor/editorInput';
-import { computeEditorAriaLabel } from 'vs/workbench/browser/editor';
-import { StandardKeyboardEvent } from 'vs/base/browser/keyboardEvent';
-import { EventType as TouchEventType, GestureEvent, Gesture } from 'vs/base/browser/touch';
-import { KeyCode } from 'vs/base/common/keyCodes';
-import { ResourceLabels, IResourceLabel, DEFAULT_LABELS_CONTAINER } from 'vs/workbench/browser/labels';
-import { ActionBar } from 'vs/base/browser/ui/actionbar/actionbar';
-import { IContextMenuService } from 'vs/platform/contextview/browser/contextView';
-import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
-import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
-import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
-import { MenuId } from 'vs/platform/actions/common/actions';
-import { EditorCommandsContextActionRunner, EditorTabsControl } from 'vs/workbench/browser/parts/editor/editorTabsControl';
-import { IQuickInputService } from 'vs/platform/quickinput/common/quickInput';
-import { IDisposable, dispose, DisposableStore, combinedDisposable, MutableDisposable, toDisposable } from 'vs/base/common/lifecycle';
-import { ScrollableElement } from 'vs/base/browser/ui/scrollbar/scrollableElement';
-import { ScrollbarVisibility } from 'vs/base/common/scrollable';
-import { getOrSet } from 'vs/base/common/map';
-import { IThemeService, registerThemingParticipant } from 'vs/platform/theme/common/themeService';
-import { TAB_INACTIVE_BACKGROUND, TAB_ACTIVE_BACKGROUND, TAB_ACTIVE_FOREGROUND, TAB_INACTIVE_FOREGROUND, TAB_BORDER, EDITOR_DRAG_AND_DROP_BACKGROUND, TAB_UNFOCUSED_ACTIVE_FOREGROUND, TAB_UNFOCUSED_INACTIVE_FOREGROUND, TAB_UNFOCUSED_ACTIVE_BACKGROUND, TAB_UNFOCUSED_ACTIVE_BORDER, TAB_ACTIVE_BORDER, TAB_HOVER_BACKGROUND, TAB_HOVER_BORDER, TAB_UNFOCUSED_HOVER_BACKGROUND, TAB_UNFOCUSED_HOVER_BORDER, EDITOR_GROUP_HEADER_TABS_BACKGROUND, WORKBENCH_BACKGROUND, TAB_ACTIVE_BORDER_TOP, TAB_UNFOCUSED_ACTIVE_BORDER_TOP, TAB_ACTIVE_MODIFIED_BORDER, TAB_INACTIVE_MODIFIED_BORDER, TAB_UNFOCUSED_ACTIVE_MODIFIED_BORDER, TAB_UNFOCUSED_INACTIVE_MODIFIED_BORDER, TAB_UNFOCUSED_INACTIVE_BACKGROUND, TAB_HOVER_FOREGROUND, TAB_UNFOCUSED_HOVER_FOREGROUND, EDITOR_GROUP_HEADER_TABS_BORDER, TAB_LAST_PINNED_BORDER } from 'vs/workbench/common/theme';
-import { activeContrastBorder, contrastBorder, editorBackground } from 'vs/platform/theme/common/colorRegistry';
-import { ResourcesDropHandler, DraggedEditorIdentifier, DraggedEditorGroupIdentifier, extractTreeDropData, isWindowDraggedOver } from 'vs/workbench/browser/dnd';
-import { Color } from 'vs/base/common/color';
-import { INotificationService } from 'vs/platform/notification/common/notification';
-import { MergeGroupMode, IMergeGroupOptions } from 'vs/workbench/services/editor/common/editorGroupsService';
-import { addDisposableListener, EventType, EventHelper, Dimension, scheduleAtNextAnimationFrame, findParentWithClass, clearNode, DragAndDropObserver, isMouseEvent, getWindow, runWhenWindowIdle } from 'vs/base/browser/dom';
-import { localize } from 'vs/nls';
-import { IEditorGroupsView, EditorServiceImpl, IEditorGroupView, IInternalEditorOpenOptions, IEditorPartsView } from 'vs/workbench/browser/parts/editor/editor';
-import { CloseOneEditorAction, UnpinEditorAction } from 'vs/workbench/browser/parts/editor/editorActions';
-import { assertAllDefined, assertIsDefined } from 'vs/base/common/types';
-import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
-import { basenameOrAuthority } from 'vs/base/common/resources';
-import { RunOnceScheduler } from 'vs/base/common/async';
-import { IPathService } from 'vs/workbench/services/path/common/pathService';
-import { IPath, win32, posix } from 'vs/base/common/path';
-import { coalesce, insert } from 'vs/base/common/arrays';
-import { isHighContrast } from 'vs/platform/theme/common/theme';
-import { isSafari } from 'vs/base/browser/browser';
-import { equals } from 'vs/base/common/objects';
-import { EditorActivation, IEditorOptions } from 'vs/platform/editor/common/editor';
-import { UNLOCK_GROUP_COMMAND_ID } from 'vs/workbench/browser/parts/editor/editorCommands';
-import { StandardMouseEvent } from 'vs/base/browser/mouseEvent';
-import { ITreeViewsDnDService } from 'vs/editor/common/services/treeViewsDndService';
-import { DraggedTreeItemsIdentifier } from 'vs/editor/common/services/treeViewsDnd';
-import { IEditorResolverService } from 'vs/workbench/services/editor/common/editorResolverService';
-import { IEditorTitleControlDimensions } from 'vs/workbench/browser/parts/editor/editorTitleControl';
-import { StickyEditorGroupModel, UnstickyEditorGroupModel } from 'vs/workbench/common/editor/filteredEditorGroupModel';
-import { IReadonlyEditorGroupModel } from 'vs/workbench/common/editor/editorGroupModel';
-import { ILifecycleService, LifecyclePhase } from 'vs/workbench/services/lifecycle/common/lifecycle';
-import { IHostService } from 'vs/workbench/services/host/browser/host';
+import './media/multieditortabscontrol.css';
+import { isLinux, isMacintosh, isWindows } from '../../../../base/common/platform.js';
+import { shorten } from '../../../../base/common/labels.js';
+import { EditorResourceAccessor, Verbosity, IEditorPartOptions, SideBySideEditor, DEFAULT_EDITOR_ASSOCIATION, EditorInputCapabilities, IUntypedEditorInput, preventEditorClose, EditorCloseMethod, EditorsOrder, IToolbarActions } from '../../../common/editor.js';
+import { EditorInput } from '../../../common/editor/editorInput.js';
+import { computeEditorAriaLabel } from '../../editor.js';
+import { StandardKeyboardEvent } from '../../../../base/browser/keyboardEvent.js';
+import { EventType as TouchEventType, GestureEvent, Gesture } from '../../../../base/browser/touch.js';
+import { KeyCode } from '../../../../base/common/keyCodes.js';
+import { ResourceLabels, IResourceLabel, DEFAULT_LABELS_CONTAINER } from '../../labels.js';
+import { ActionBar } from '../../../../base/browser/ui/actionbar/actionbar.js';
+import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
+import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
+import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
+import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
+import { IMenuService, MenuId } from '../../../../platform/actions/common/actions.js';
+import { EditorCommandsContextActionRunner, EditorTabsControl } from './editorTabsControl.js';
+import { clearConnectedTabClipping, IConnectedTabBounds, updateConnectedTabClipping } from './connectedTabClipping.js';
+import { IQuickInputService } from '../../../../platform/quickinput/common/quickInput.js';
+import { IDisposable, dispose, DisposableStore, combinedDisposable, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
+import { ScrollableElement } from '../../../../base/browser/ui/scrollbar/scrollableElement.js';
+import { ScrollbarVisibility } from '../../../../base/common/scrollable.js';
+import { getOrSet } from '../../../../base/common/map.js';
+import { IThemeService, registerThemingParticipant } from '../../../../platform/theme/common/themeService.js';
+import { TAB_INACTIVE_BACKGROUND, TAB_ACTIVE_BACKGROUND, TAB_BORDER, EDITOR_DRAG_AND_DROP_BACKGROUND, TAB_UNFOCUSED_ACTIVE_BACKGROUND, TAB_UNFOCUSED_ACTIVE_BORDER, TAB_ACTIVE_BORDER, TAB_HOVER_BACKGROUND, TAB_HOVER_BORDER, TAB_UNFOCUSED_HOVER_BACKGROUND, TAB_UNFOCUSED_HOVER_BORDER, EDITOR_GROUP_HEADER_TABS_BACKGROUND, WORKBENCH_BACKGROUND, TAB_ACTIVE_BORDER_TOP, TAB_UNFOCUSED_ACTIVE_BORDER_TOP, TAB_ACTIVE_MODIFIED_BORDER, TAB_INACTIVE_MODIFIED_BORDER, TAB_UNFOCUSED_ACTIVE_MODIFIED_BORDER, TAB_UNFOCUSED_INACTIVE_MODIFIED_BORDER, TAB_UNFOCUSED_INACTIVE_BACKGROUND, TAB_HOVER_FOREGROUND, TAB_UNFOCUSED_HOVER_FOREGROUND, EDITOR_GROUP_HEADER_TABS_BORDER, TAB_LAST_PINNED_BORDER, TAB_SELECTED_BORDER_TOP } from '../../../common/theme.js';
+import { activeContrastBorder, contrastBorder, editorBackground } from '../../../../platform/theme/common/colorRegistry.js';
+import { ResourcesDropHandler, DraggedEditorIdentifier, DraggedEditorGroupIdentifier, extractTreeDropData, isWindowDraggedOver } from '../../dnd.js';
+import { Color } from '../../../../base/common/color.js';
+import { INotificationService } from '../../../../platform/notification/common/notification.js';
+import { MergeGroupMode, IMergeGroupOptions } from '../../../services/editor/common/editorGroupsService.js';
+import { addDisposableListener, EventType, EventHelper, Dimension, scheduleAtNextAnimationFrame, findParentWithClass, clearNode, DragAndDropObserver, isMouseEvent, getWindow, ModifierKeyEmitter, $, isHTMLElement, getTotalWidth, getContentWidth } from '../../../../base/browser/dom.js';
+import { localize } from '../../../../nls.js';
+import { CONNECTED_EDITOR_TABS_SELECTOR, IEditorGroupMenuIds, IEditorGroupsView, EditorServiceImpl, IEditorGroupView, IInternalEditorOpenOptions, IEditorPartsView, prepareMoveCopyEditors } from './editor.js';
+import { PART_GRID_TOP_STRIP_CLASS } from './partGridClass.js';
+import { CloseEditorTabAction, CloseOtherEditorTabsInGroupAction, UnpinEditorAction } from './editorActions.js';
+import { assertReturnsAllDefined, assertReturnsDefined } from '../../../../base/common/types.js';
+import { IEditorService } from '../../../services/editor/common/editorService.js';
+import { basenameOrAuthority } from '../../../../base/common/resources.js';
+import { RunOnceScheduler } from '../../../../base/common/async.js';
+import { IPathService } from '../../../services/path/common/pathService.js';
+import { IPath, win32, posix } from '../../../../base/common/path.js';
+import { coalesce, insert } from '../../../../base/common/arrays.js';
+import { isHighContrast } from '../../../../platform/theme/common/theme.js';
+import { isSafari } from '../../../../base/browser/browser.js';
+import { equals } from '../../../../base/common/objects.js';
+import { EditorActivation, IEditorOptions } from '../../../../platform/editor/common/editor.js';
+import { UNLOCK_GROUP_COMMAND_ID } from './editorCommands.js';
+import { StandardMouseEvent } from '../../../../base/browser/mouseEvent.js';
+import { ITreeViewsDnDService } from '../../../../editor/common/services/treeViewsDndService.js';
+import { DraggedTreeItemsIdentifier } from '../../../../editor/common/services/treeViewsDnd.js';
+import { IEditorResolverService } from '../../../services/editor/common/editorResolverService.js';
+import { IModelService } from '../../../../editor/common/services/model.js';
+import { IEditorTitleControlDimensions } from './editorTitleControl.js';
+import { StickyEditorGroupModel, UnstickyEditorGroupModel } from '../../../common/editor/filteredEditorGroupModel.js';
+import { IReadonlyEditorGroupModel } from '../../../common/editor/editorGroupModel.js';
+import { IHostService } from '../../../services/host/browser/host.js';
+import { BugIndicatingError } from '../../../../base/common/errors.js';
+import { applyDragImage } from '../../../../base/browser/ui/dnd/dnd.js';
+import { getEditorsTransferVeto, getGroupTransferVeto } from './editorTransferVeto.js';
 
 interface IEditorInputLabel {
 	readonly editor: EditorInput;
@@ -98,6 +103,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		shrink: 80 as const,
 		fit: 120 as const
 	};
+	private static readonly MODERN_UI_COMPACT_PINNED_TAB_WIDTH = 28 as const;
 
 	private static readonly DRAG_OVER_OPEN_TAB_THRESHOLD = 1500;
 
@@ -106,12 +112,24 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 	private titleContainer: HTMLElement | undefined;
 	private tabsAndActionsContainer: HTMLElement | undefined;
+	private editorToolbarsContainer: HTMLElement | undefined;
+	private stickyTabsBackground: HTMLElement | undefined;
 	private tabsContainer: HTMLElement | undefined;
 	private tabsScrollbar: ScrollableElement | undefined;
+	private connectedTabOverflowEdge: HTMLElement | undefined;
+	private connectedTabLabels = false;
+	private addTabContainer: HTMLElement | undefined;
 	private tabSizingFixedDisposables: DisposableStore | undefined;
+	private connectedTabBounds: IConnectedTabBounds | undefined;
 
-	private readonly closeEditorAction = this._register(this.instantiationService.createInstance(CloseOneEditorAction, CloseOneEditorAction.ID, CloseOneEditorAction.LABEL));
+	private readonly closeEditorAction = this._register(this.instantiationService.createInstance(CloseEditorTabAction, CloseEditorTabAction.ID, CloseEditorTabAction.LABEL));
 	private readonly unpinEditorAction = this._register(this.instantiationService.createInstance(UnpinEditorAction, UnpinEditorAction.ID, UnpinEditorAction.LABEL));
+	private readonly closeOtherEditorTabsInGroupAction = this._register(this.instantiationService.createInstance(CloseOtherEditorTabsInGroupAction, CloseOtherEditorTabsInGroupAction.ID, CloseOtherEditorTabsInGroupAction.LABEL));
+
+	// Alt-hold alternative to a tab's close action (JetBrains-style), applied only
+	// to the currently hovered tab; see updateTabActionForHoveredTab().
+	private hoveredTabIndex: number | undefined;
+	private isAltPressed = false;
 
 	private readonly tabResourceLabels = this._register(this.instantiationService.createInstance(ResourceLabels, DEFAULT_LABELS_CONTAINER));
 	private tabLabels: IEditorInputLabel[] = [];
@@ -139,6 +157,9 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		groupsView: IEditorGroupsView,
 		groupView: IEditorGroupView,
 		tabsModel: IReadonlyEditorGroupModel,
+		menuIds: IEditorGroupMenuIds | undefined,
+		breadcrumbsInHeader: boolean,
+		useModernUITabs: boolean,
 		@IContextMenuService contextMenuService: IContextMenuService,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IContextKeyService contextKeyService: IContextKeyService,
@@ -150,10 +171,11 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		@IPathService private readonly pathService: IPathService,
 		@ITreeViewsDnDService private readonly treeViewsDragAndDropService: ITreeViewsDnDService,
 		@IEditorResolverService editorResolverService: IEditorResolverService,
-		@ILifecycleService private readonly lifecycleService: ILifecycleService,
-		@IHostService hostService: IHostService
+		@IHostService hostService: IHostService,
+		@IMenuService menuService: IMenuService,
+		@IModelService modelService: IModelService,
 	) {
-		super(parent, editorPartsView, groupsView, groupView, tabsModel, contextMenuService, instantiationService, contextKeyService, keybindingService, notificationService, quickInputService, themeService, editorResolverService, hostService);
+		super(parent, editorPartsView, groupsView, groupView, tabsModel, menuIds, breadcrumbsInHeader, useModernUITabs, contextMenuService, instantiationService, contextKeyService, keybindingService, notificationService, quickInputService, themeService, editorResolverService, hostService, menuService, modelService);
 
 		// Resolve the correct path library for the OS we are on
 		// If we are connected to remote, this accounts for the
@@ -162,23 +184,93 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 		// React to decorations changing for our resource labels
 		this._register(this.tabResourceLabels.onDidChangeDecorations(() => this.doHandleDecorationsChange()));
+
+		// React to Alt being held/released to swap in the "Close Others" tab action
+		// for the currently hovered tab only (if any).
+		this._register(ModifierKeyEmitter.getInstance().event(e => this.setAltPressed(e.altKey)));
+
+		// Alt can get stuck when focus leaves the window while it is held (e.g. Alt+Tab
+		// to another application) because the matching `keyup` is never received. Give
+		// up on the swap entirely in that case so that a tab that is still hovered does
+		// not silently keep the "Close Others" action (https://github.com/microsoft/vscode/issues/331979)
+		this._register(hostService.onDidChangeFocus(hasFocus => {
+			if (!hasFocus) {
+				this.setAltPressed(false);
+				this.setHoveredTab(undefined);
+			}
+		}));
 	}
 
-	protected override create(parent: HTMLElement): void {
+	// Tracks whether Alt is currently held to swap a tab's close action (see
+	// redrawTabAction()). Besides the modifier key events this is also re-validated
+	// from mouse events over the tabs because those always carry the actual state,
+	// even when a `keyup` went to another application.
+	private setAltPressed(isAltPressed: boolean): void {
+		if (this.isAltPressed === isAltPressed) {
+			return;
+		}
+
+		this.isAltPressed = isAltPressed;
+
+		this.updateTabActionForHoveredTab();
+	}
+
+	private updateTabActionForHoveredTab(): void {
+		if (typeof this.hoveredTabIndex !== 'number') {
+			return; // no tab hovered, nothing to update
+		}
+
+		this.redrawTabActionAtIndex(this.hoveredTabIndex);
+	}
+
+	private redrawTabActionAtIndex(tabIndex: number): void {
+		const editor = this.tabsModel.getEditorByIndex(tabIndex);
+		if (editor) {
+			this.doWithTab(tabIndex, editor, (editor, tabIndex, tabContainer, tabLabelWidget, tabLabel, tabActionBar) => this.redrawTabAction(editor, tabIndex, tabContainer, tabActionBar));
+		}
+	}
+
+	// Tracks which tab (if any) the mouse is currently over so the Alt-hold "Close
+	// Others" swap (see redrawTabAction()) applies only to that single tab.
+	private setHoveredTab(tabIndex: number | undefined): void {
+		if (this.hoveredTabIndex === tabIndex) {
+			return;
+		}
+
+		const previousHoveredTabIndex = this.hoveredTabIndex;
+		this.hoveredTabIndex = tabIndex;
+		this.updateConnectedTabOverflowHover();
+
+		if (!this.isAltPressed) {
+			return; // Alt is not held, no action swap in effect to redraw
+		}
+
+		if (typeof previousHoveredTabIndex === 'number') {
+			this.redrawTabActionAtIndex(previousHoveredTabIndex);
+		}
+
+		if (typeof tabIndex === 'number') {
+			this.redrawTabActionAtIndex(tabIndex);
+		}
+	}
+
+	protected override create(parent: HTMLElement): HTMLElement {
 		super.create(parent);
 
 		this.titleContainer = parent;
 
 		// Tabs and Actions Container (are on a single row with flex side-by-side)
-		this.tabsAndActionsContainer = document.createElement('div');
-		this.tabsAndActionsContainer.classList.add('tabs-and-actions-container');
+		this.tabsAndActionsContainer = $(`.tabs-and-actions-container.${PART_GRID_TOP_STRIP_CLASS}`);
 		this.titleContainer.appendChild(this.tabsAndActionsContainer);
 
+		this.stickyTabsBackground = $('.sticky-tabs-background', { 'aria-hidden': true });
+
 		// Tabs Container
-		this.tabsContainer = document.createElement('div');
-		this.tabsContainer.setAttribute('role', 'tablist');
-		this.tabsContainer.draggable = true;
-		this.tabsContainer.classList.add('tabs-container');
+		this.tabsContainer = $('.tabs-container', {
+			role: 'tablist',
+			'aria-multiselectable': 'true',
+			draggable: true
+		});
 		this._register(Gesture.addTarget(this.tabsContainer));
 
 		this.tabSizingFixedDisposables = this._register(new DisposableStore());
@@ -187,20 +279,60 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		// Tabs Scrollbar
 		this.tabsScrollbar = this.createTabsScrollbar(this.tabsContainer);
 		this.tabsAndActionsContainer.appendChild(this.tabsScrollbar.getDomNode());
+		this.tabsScrollbar.getDomNode().appendChild(this.stickyTabsBackground);
+		this.connectedTabOverflowEdge = $('.tab-connected-overflow-edge', { 'aria-hidden': true });
+		const connectedTabOverflowRight = $('.tab-connected-overflow-right');
+		connectedTabOverflowRight.appendChild($('.tab-connected-overflow-right-edge'));
+		this.connectedTabOverflowEdge.appendChild(connectedTabOverflowRight);
+		this.tabsScrollbar.getDomNode().appendChild(this.connectedTabOverflowEdge);
 
 		// Tabs Container listeners
 		this.registerTabsContainerListeners(this.tabsContainer, this.tabsScrollbar);
 
+		// Create add tab control (only when a menu id is configured, e.g. in
+		// the single-pane Agents window layout). When unset, no add-tab control
+		// is created and the last tab remains the last child of the tabs
+		// container, which tab layout logic relies on (see #324902).
+		if (this.menuIds?.tabsBarAddTab) {
+			this.tabsContainer.classList.add('has-add-tab');
+			this.addTabContainer = this.createAddTabControl(this.tabsContainer, this.menuIds.tabsBarAddTab, undefined, () => this.layout(this.dimensions));
+		}
+
 		// Create Editor Toolbar
-		this.createEditorActionsToolBar(this.tabsAndActionsContainer, ['editor-actions']);
+		this.editorToolbarsContainer = $('.editor-toolbars');
+		this.tabsAndActionsContainer.appendChild(this.editorToolbarsContainer);
+		this.createEditorActionsToolBar(this.editorToolbarsContainer, ['editor-actions']);
 
 		// Set tabs control visibility
 		this.updateTabsControlVisibility();
+
+		return this.tabsAndActionsContainer;
+	}
+
+	private get tabCount(): number {
+		const tabsContainer = assertReturnsDefined(this.tabsContainer);
+		return this.addTabContainer ? tabsContainer.children.length - 1 : tabsContainer.children.length;
+	}
+
+	private appendTab(tab: HTMLElement, tabsContainer: HTMLElement): void {
+		if (this.addTabContainer) {
+			tabsContainer.insertBefore(tab, this.addTabContainer);
+		} else {
+			tabsContainer.appendChild(tab);
+		}
+	}
+
+	private removeLastTab(tabsContainer: HTMLElement): void {
+		if (this.addTabContainer) {
+			this.addTabContainer.previousElementSibling?.remove();
+		} else {
+			tabsContainer.lastChild?.remove();
+		}
 	}
 
 	private createTabsScrollbar(scrollable: HTMLElement): ScrollableElement {
 		const tabsScrollbar = this._register(new ScrollableElement(scrollable, {
-			horizontal: ScrollbarVisibility.Auto,
+			horizontal: this.getTabsScrollbarVisibility(),
 			horizontalScrollbarSize: this.getTabsScrollbarSizing(),
 			vertical: ScrollbarVisibility.Hidden,
 			scrollYToX: true,
@@ -210,6 +342,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		this._register(tabsScrollbar.onScroll(e => {
 			if (e.scrollLeftChanged) {
 				scrollable.scrollLeft = e.scrollLeft;
+				this.updateConnectedTabClipping(e.scrollLeft);
 			}
 		}));
 
@@ -222,8 +355,14 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		});
 	}
 
+	private updateTabsScrollbarVisibility(): void {
+		this.tabsScrollbar?.updateOptions({
+			horizontal: this.getTabsScrollbarVisibility()
+		});
+	}
+
 	private updateTabSizing(fromEvent: boolean): void {
-		const [tabsContainer, tabSizingFixedDisposables] = assertAllDefined(this.tabsContainer, this.tabSizingFixedDisposables);
+		const [tabsContainer, tabSizingFixedDisposables] = assertReturnsAllDefined(this.tabsContainer, this.tabSizingFixedDisposables);
 
 		tabSizingFixedDisposables.clear();
 
@@ -270,6 +409,14 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		return MultiEditorTabsControl.SCROLLBAR_SIZES.large;
 	}
 
+	private getTabsScrollbarVisibility(): ScrollbarVisibility {
+		switch (this.groupsView.partOptions.titleScrollbarVisibility) {
+			case 'visible': return ScrollbarVisibility.Visible;
+			case 'hidden': return ScrollbarVisibility.Hidden;
+			default: return ScrollbarVisibility.Auto;
+		}
+	}
+
 	private registerTabsContainerListeners(tabsContainer: HTMLElement, tabsScrollbar: ScrollableElement): void {
 
 		// Forward scrolling inside the container to our custom scrollbar
@@ -278,6 +425,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 				tabsScrollbar.setScrollPosition({
 					scrollLeft: tabsContainer.scrollLeft // during DND the container gets scrolled so we need to update the custom scrollbar
 				});
+				this.updateConnectedTabClipping(tabsContainer.scrollLeft);
 			}
 		}));
 
@@ -302,6 +450,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 				this.editorService.openEditor({
 					resource: undefined,
+					untitledOrigin: 'tabBarDoubleClick',
 					options: {
 						pinned: true,
 						index: this.groupView.count, // always at the end
@@ -318,11 +467,36 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			}
 		}));
 
+		// Clear the hovered tab once the mouse leaves the tabs container entirely
+		this._register(addDisposableListener(tabsContainer, EventType.MOUSE_LEAVE, () => {
+			this.setHoveredTab(undefined);
+		}));
+
+		// Re-validate the Alt state from mouse events over the tabs: the `keyup` for
+		// Alt may have been missed while another application had focus, in which case
+		// the tab action would otherwise remain swapped to "Close Others". Listen in
+		// the capture phase because the tab action stops the mouse down event.
+		for (const eventType of [EventType.MOUSE_MOVE, EventType.MOUSE_DOWN]) {
+			this._register(addDisposableListener(tabsContainer, eventType, (e: MouseEvent) => {
+				this.setAltPressed(e.altKey);
+			}, true));
+		}
+
+		// Prevent auto-pasting (https://github.com/microsoft/vscode/issues/201696)
+		if (isLinux) {
+			this._register(addDisposableListener(tabsContainer, EventType.MOUSE_UP, e => {
+				if (e.button === 1) {
+					e.preventDefault();
+				}
+			}));
+		}
+
 		// Drag & Drop support
 		let lastDragEvent: DragEvent | undefined = undefined;
+		let isNewWindowOperation = false;
 		this._register(new DragAndDropObserver(tabsContainer, {
 			onDragStart: e => {
-				this.onGroupDragStart(e, tabsContainer);
+				isNewWindowOperation = this.onGroupDragStart(e, tabsContainer);
 			},
 
 			onDrag: e => {
@@ -335,8 +509,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 				tabsContainer.classList.add('scroll');
 
 				// Return if the target is not on the tabs container
-				if (e.target !== tabsContainer) {
-					this.updateDropFeedback(tabsContainer, false); // fixes https://github.com/microsoft/vscode/issues/52093
+				if (!this.isDropAfterLastTabTarget(e, tabsContainer)) {
 					return;
 				}
 
@@ -349,52 +522,34 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 					return;
 				}
 
-				// Return if dragged editor is last tab because then this is a no-op
-				let isLocalDragAndDrop = false;
-				if (this.editorTransfer.hasData(DraggedEditorIdentifier.prototype)) {
-					isLocalDragAndDrop = true;
-
-					const data = this.editorTransfer.getData(DraggedEditorIdentifier.prototype);
-					if (Array.isArray(data)) {
-						const localDraggedEditor = data[0].identifier;
-						if (this.groupView.id === localDraggedEditor.groupId && this.tabsModel.isLast(localDraggedEditor.editor)) {
-							if (e.dataTransfer) {
-								e.dataTransfer.dropEffect = 'none';
-							}
-
-							return;
-						}
-					}
-				}
-
 				// Update the dropEffect to "copy" if there is no local data to be dragged because
 				// in that case we can only copy the data into and not move it from its source
-				if (!isLocalDragAndDrop) {
+				if (!this.editorTransfer.hasData(DraggedEditorIdentifier.prototype)) {
 					if (e.dataTransfer) {
 						e.dataTransfer.dropEffect = 'copy';
 					}
 				}
 
-				this.updateDropFeedback(tabsContainer, true);
+				this.updateDropFeedback(tabsContainer, true, e);
 			},
 
 			onDragLeave: e => {
-				this.updateDropFeedback(tabsContainer, false);
+				this.updateDropFeedback(tabsContainer, false, e);
 				tabsContainer.classList.remove('scroll');
 			},
 
 			onDragEnd: e => {
-				this.updateDropFeedback(tabsContainer, false);
+				this.updateDropFeedback(tabsContainer, false, e);
 				tabsContainer.classList.remove('scroll');
 
-				this.onGroupDragEnd(e, lastDragEvent, tabsContainer);
+				this.onGroupDragEnd(e, lastDragEvent, tabsContainer, isNewWindowOperation);
 			},
 
 			onDrop: e => {
-				this.updateDropFeedback(tabsContainer, false);
+				this.updateDropFeedback(tabsContainer, false, e);
 				tabsContainer.classList.remove('scroll');
 
-				if (e.target === tabsContainer) {
+				if (this.isDropAfterLastTabTarget(e, tabsContainer)) {
 					const isGroupTransfer = this.groupTransfer.hasData(DraggedEditorGroupIdentifier.prototype);
 					this.onDrop(e, isGroupTransfer ? this.groupView.count : this.tabsModel.count, tabsContainer);
 				}
@@ -431,7 +586,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 			// Figure out scrolling direction but ignore it if too subtle
 			let tabSwitchDirection: number;
-			if (e.deltaX + e.deltaY < - MultiEditorTabsControl.MOUSE_WHEEL_DISTANCE_THRESHOLD) {
+			if (e.deltaX + e.deltaY < -MultiEditorTabsControl.MOUSE_WHEEL_DISTANCE_THRESHOLD) {
 				tabSwitchDirection = -1;
 			} else if (e.deltaX + e.deltaY > MultiEditorTabsControl.MOUSE_WHEEL_DISTANCE_THRESHOLD) {
 				tabSwitchDirection = 1;
@@ -458,13 +613,13 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			// Find target anchor
 			let anchor: HTMLElement | StandardMouseEvent = tabsContainer;
 			if (isMouseEvent(e)) {
-				anchor = new StandardMouseEvent(getWindow(tabsContainer), e);
+				anchor = new StandardMouseEvent(getWindow(this.parent), e);
 			}
 
 			// Show it
 			this.contextMenuService.showContextMenu({
 				getAnchor: () => anchor,
-				menuId: MenuId.EditorTabsBarContext,
+				menuId: this.menuIds?.tabsBarContext ?? MenuId.EditorTabsBarContext,
 				contextKeyService: this.contextKeyService,
 				menuActionOptions: { shouldForwardArgs: true },
 				getActionsContext: () => ({ groupId: this.groupView.id }),
@@ -478,6 +633,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 	}
 
 	private doHandleDecorationsChange(): void {
+		this.forEachTab((_editor, _index, tab) => tab.style.removeProperty('--tab-sizing-fit-width'));
 
 		// A change to decorations potentially has an impact on the size of tabs
 		// so we need to trigger a layout in that case to adjust things
@@ -489,6 +645,11 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 		// Changing the actions in the toolbar can have an impact on the size of the
 		// tab container, so we need to layout the tabs to make sure the active is visible
+		this.layout(this.dimensions);
+	}
+
+	protected override updateEditorLayoutActionsToolbar(): void {
+		super.updateEditorLayoutActionsToolbar();
 		this.layout(this.dimensions);
 	}
 
@@ -513,9 +674,9 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		this.updateTabsControlVisibility();
 
 		// Create tabs as needed
-		const [tabsContainer, tabsScrollbar] = assertAllDefined(this.tabsContainer, this.tabsScrollbar);
-		for (let i = tabsContainer.children.length; i < this.tabsModel.count; i++) {
-			tabsContainer.appendChild(this.createTab(i, tabsContainer, tabsScrollbar));
+		const [tabsContainer, tabsScrollbar] = assertReturnsAllDefined(this.tabsContainer, this.tabsScrollbar);
+		for (let i = this.tabCount; i < this.tabsModel.count; i++) {
+			this.appendTab(this.createTab(i, tabsContainer, tabsScrollbar), tabsContainer);
 		}
 
 		// Make sure to recompute tab labels and detect
@@ -523,16 +684,15 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		// redraw of tabs.
 
 		const activeEditorChanged = this.didActiveEditorChange();
-		const oldActiveTabLabel = this.activeTabLabel;
-		const oldTabLabelsLength = this.tabLabels.length;
+		const oldTabLabels = this.tabLabels;
 		this.computeTabLabels();
 
 		// Redraw and update in these cases
 		let didChange = false;
 		if (
-			activeEditorChanged ||													// active editor changed
-			oldTabLabelsLength !== this.tabLabels.length ||							// number of tabs changed
-			!this.equalsEditorInputLabel(oldActiveTabLabel, this.activeTabLabel)	// active editor label changed
+			activeEditorChanged ||																				// active editor changed
+			oldTabLabels.length !== this.tabLabels.length ||													// number of tabs changed
+			oldTabLabels.some((label, index) => !this.equalsEditorInputLabel(label, this.tabLabels.at(index))) 	// editor labels changed
 		) {
 			this.redraw({ forceRevealActiveTab: true });
 			didChange = true;
@@ -597,15 +757,21 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 	private handleClosedEditors(): void {
 
+		// A stale hovered tab index could otherwise leave a tab
+		// showing "Close Others" after the tabs it pointed past got removed
+		if (typeof this.hoveredTabIndex === 'number' && this.hoveredTabIndex >= this.tabsModel.count) {
+			this.setHoveredTab(undefined);
+		}
+
 		// There are tabs to show
 		if (this.tabsModel.count) {
 
 			// Remove tabs that got closed
-			const tabsContainer = assertIsDefined(this.tabsContainer);
-			while (tabsContainer.children.length > this.tabsModel.count) {
+			const tabsContainer = assertReturnsDefined(this.tabsContainer);
+			while (this.tabCount > this.tabsModel.count) {
 
 				// Remove one tab from container (must be the last to keep indexes in order!)
-				tabsContainer.lastChild?.remove();
+				this.removeLastTab(tabsContainer);
 
 				// Remove associated tab label and widget
 				dispose(this.tabDisposables.pop());
@@ -622,6 +788,9 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		else {
 			if (this.tabsContainer) {
 				clearNode(this.tabsContainer);
+				if (this.addTabContainer) {
+					this.tabsContainer.appendChild(this.addTabContainer);
+				}
 			}
 
 			this.tabDisposables = dispose(this.tabDisposables);
@@ -635,19 +804,19 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		}
 	}
 
-	moveEditor(editor: EditorInput, fromTabIndex: number, targeTabIndex: number): void {
+	moveEditor(editor: EditorInput, fromTabIndex: number, targetTabIndex: number): void {
 
 		// Move the editor label
 		const editorLabel = this.tabLabels[fromTabIndex];
 		this.tabLabels.splice(fromTabIndex, 1);
-		this.tabLabels.splice(targeTabIndex, 0, editorLabel);
+		this.tabLabels.splice(targetTabIndex, 0, editorLabel);
 
 		// Redraw tabs in the range of the move
 		this.forEachTab((editor, tabIndex, tabContainer, tabLabelWidget, tabLabel, tabActionBar) => {
 			this.redrawTab(editor, tabIndex, tabContainer, tabLabelWidget, tabLabel, tabActionBar);
 		},
-			Math.min(fromTabIndex, targeTabIndex), 	// from: smallest of fromTabIndex/targeTabIndex
-			Math.max(fromTabIndex, targeTabIndex)	//   to: largest of fromTabIndex/targeTabIndex
+			Math.min(fromTabIndex, targetTabIndex), // from: smallest of fromTabIndex/targetTabIndex
+			Math.max(fromTabIndex, targetTabIndex)	//   to: largest of fromTabIndex/targetTabIndex
 		);
 
 		// Moving an editor requires a layout to keep the active editor visible
@@ -669,7 +838,9 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 	private doHandleStickyEditorChange(editor: EditorInput): void {
 
 		// Update tab
-		this.withTab(editor, (editor, tabIndex, tabContainer, tabLabelWidget, tabLabel, tabActionBar) => this.redrawTab(editor, tabIndex, tabContainer, tabLabelWidget, tabLabel, tabActionBar));
+		this.withTab(editor, (editor, tabIndex, tabContainer, tabLabelWidget, tabLabel, tabActionBar) => {
+			this.redrawTab(editor, tabIndex, tabContainer, tabLabelWidget, tabLabel, tabActionBar);
+		});
 
 		// Sticky change has an impact on each tab's border because
 		// it potentially moves the border to the last pinned tab
@@ -685,12 +856,26 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 		// Activity has an impact on each tab's active indication
 		this.forEachTab((editor, tabIndex, tabContainer, tabLabelWidget, tabLabel, tabActionBar) => {
-			this.redrawTabActiveAndDirty(isGroupActive, editor, tabContainer, tabActionBar);
+			this.redrawTabSelectedActiveAndDirty(isGroupActive, editor, tabContainer, tabActionBar);
 		});
 
 		// Activity has an impact on the toolbar, so we need to update and layout
 		this.updateEditorActionsToolbar();
 		this.layout(this.dimensions, { forceRevealActiveTab: true });
+	}
+
+	updateEditorSelections(): void {
+		this.forEachTab((editor, tabIndex, tabContainer, tabLabelWidget, tabLabel, tabActionBar) => {
+			this.redrawTabSelectedActiveAndDirty(this.groupsView.activeGroup === this.groupView, editor, tabContainer, tabActionBar);
+		});
+		this.invalidateConnectedTabLayout();
+	}
+
+	private invalidateConnectedTabLayout(): void {
+		if (this.connectedTabBounds || this.parent.closest(CONNECTED_EDITOR_TABS_SELECTOR)) {
+			this.clearConnectedTabClipping();
+			this.layout(this.dimensions);
+		}
 	}
 
 	private updateEditorLabelScheduler = this._register(new RunOnceScheduler(() => this.doUpdateEditorLabels(), 0));
@@ -720,11 +905,26 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 	}
 
 	updateEditorDirty(editor: EditorInput): void {
-		this.withTab(editor, (editor, tabIndex, tabContainer, tabLabelWidget, tabLabel, tabActionBar) => this.redrawTabActiveAndDirty(this.groupsView.activeGroup === this.groupView, editor, tabContainer, tabActionBar));
+		this.withTab(editor, (editor, tabIndex, tabContainer, tabLabelWidget, tabLabel, tabActionBar) => {
+			tabContainer.style.removeProperty('--tab-sizing-fit-width');
+			this.redrawTabSelectedActiveAndDirty(this.groupsView.activeGroup === this.groupView, editor, tabContainer, tabActionBar);
+		});
+		this.invalidateConnectedTabLayout();
+	}
+
+	updateEditorCapabilities(editor: EditorInput): void {
+		this.withTab(editor, (editor, tabIndex, tabContainer, tabLabelWidget, tabLabel, tabActionBar) => {
+			this.redrawTab(editor, tabIndex, tabContainer, tabLabelWidget, tabLabel, tabActionBar);
+		});
+		this.invalidateConnectedTabLayout();
 	}
 
 	override updateOptions(oldOptions: IEditorPartOptions, newOptions: IEditorPartOptions): void {
 		super.updateOptions(oldOptions, newOptions);
+
+		if (oldOptions.tabHeight !== newOptions.tabHeight) {
+			this.forEachTab((_editor, _index, tab) => tab.style.removeProperty('--tab-sizing-fit-width'));
+		}
 
 		// A change to a label format options requires to recompute all labels
 		if (oldOptions.labelFormat !== newOptions.labelFormat) {
@@ -734,6 +934,16 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		// Update tabs scrollbar sizing
 		if (oldOptions.titleScrollbarSizing !== newOptions.titleScrollbarSizing) {
 			this.updateTabsScrollbarSizing();
+		}
+
+		// Update tabs scrollbar visibility
+		if (oldOptions.titleScrollbarVisibility !== newOptions.titleScrollbarVisibility) {
+			this.updateTabsScrollbarVisibility();
+		}
+
+		// Update editor actions
+		if (oldOptions.alwaysShowEditorActions !== newOptions.alwaysShowEditorActions) {
+			this.updateEditorActionsToolbar();
 		}
 
 		// Update tabs sizing
@@ -749,6 +959,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		if (
 			oldOptions.labelFormat !== newOptions.labelFormat ||
 			oldOptions.tabActionLocation !== newOptions.tabActionLocation ||
+			oldOptions.tabActionReserveSpace !== newOptions.tabActionReserveSpace ||
 			oldOptions.tabActionCloseVisibility !== newOptions.tabActionCloseVisibility ||
 			oldOptions.tabActionUnpinVisibility !== newOptions.tabActionUnpinVisibility ||
 			oldOptions.tabSizing !== newOptions.tabSizing ||
@@ -757,6 +968,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			oldOptions.hasIcons !== newOptions.hasIcons ||
 			oldOptions.highlightModifiedTabs !== newOptions.highlightModifiedTabs ||
 			oldOptions.wrapTabs !== newOptions.wrapTabs ||
+			oldOptions.showTabIndex !== newOptions.showTabIndex ||
 			!equals(oldOptions.decorations, newOptions.decorations)
 		) {
 			this.redraw();
@@ -786,7 +998,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 	}
 
 	private doWithTab(tabIndex: number, editor: EditorInput, fn: (editor: EditorInput, tabIndex: number, tabContainer: HTMLElement, tabLabelWidget: IResourceLabel, tabLabel: IEditorInputLabel, tabActionBar: ActionBar) => void): void {
-		const tabsContainer = assertIsDefined(this.tabsContainer);
+		const tabsContainer = assertReturnsDefined(this.tabsContainer);
 		const tabContainer = tabsContainer.children[tabIndex] as HTMLElement;
 		const tabResourceLabel = this.tabResourceLabels.get(tabIndex);
 		const tabLabel = this.tabLabels[tabIndex];
@@ -799,25 +1011,32 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 	private createTab(tabIndex: number, tabsContainer: HTMLElement, tabsScrollbar: ScrollableElement): HTMLElement {
 
 		// Tab Container
-		const tabContainer = document.createElement('div');
-		tabContainer.draggable = true;
-		tabContainer.setAttribute('role', 'tab');
-		tabContainer.classList.add('tab');
+		const tabContainer = $('.tab', {
+			draggable: true,
+			role: 'tab'
+		});
 
 		// Gesture Support
-		this._register(Gesture.addTarget(tabContainer));
+		const gestureDisposable = Gesture.addTarget(tabContainer);
+
+		// Modern UI fill and shoulder masks. Real elements leave the tab's
+		// pseudo-elements available for drop-target indicators.
+		const tabFillContainer = $('.tab-fill', { 'aria-hidden': true });
+		tabContainer.appendChild(tabFillContainer);
+		const tabConnectedEdgeContainer = $('.tab-connected-edge', { 'aria-hidden': true });
+		tabContainer.appendChild(tabConnectedEdgeContainer);
+		const tabDivider = $('.tab-divider', { 'aria-hidden': true });
+		tabContainer.appendChild(tabDivider);
 
 		// Tab Border Top
-		const tabBorderTopContainer = document.createElement('div');
-		tabBorderTopContainer.classList.add('tab-border-top-container');
+		const tabBorderTopContainer = $('.tab-border-top-container');
 		tabContainer.appendChild(tabBorderTopContainer);
 
 		// Tab Editor Label
-		const editorLabel = this.tabResourceLabels.create(tabContainer);
+		const editorLabel = this.tabResourceLabels.create(tabContainer, { hoverTargetOverride: tabContainer });
 
 		// Tab Actions
-		const tabActionsContainer = document.createElement('div');
-		tabActionsContainer.classList.add('tab-actions');
+		const tabActionsContainer = $('.tab-actions');
 		tabContainer.appendChild(tabActionsContainer);
 
 		const that = this;
@@ -828,22 +1047,26 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 		const tabActionBar = new ActionBar(tabActionsContainer, { ariaLabel: localize('ariaLabelTabActions', "Tab actions"), actionRunner: tabActionRunner });
 		const tabActionListener = tabActionBar.onWillRun(e => {
-			if (e.action.id === this.closeEditorAction.id) {
+			if (e.action.id === this.closeEditorAction.id || e.action.id === this.closeOtherEditorTabsInGroupAction.id) {
 				this.blockRevealActiveTabOnce();
 			}
 		});
 
-		const tabActionBarDisposable = combinedDisposable(tabActionBar, tabActionListener, toDisposable(insert(this.tabActionBars, tabActionBar)));
+		const tabActionBarDisposable = combinedDisposable(tabActionRunner, tabActionBar, tabActionListener, toDisposable(insert(this.tabActionBars, tabActionBar)));
+
+		// Tab Fade Hider
+		// Hides the tab fade to the right when tab action left and sizing shrink/fixed, ::after, ::before are already used
+		const tabShadowHider = $('.tab-fade-hider');
+		tabContainer.appendChild(tabShadowHider);
 
 		// Tab Border Bottom
-		const tabBorderBottomContainer = document.createElement('div');
-		tabBorderBottomContainer.classList.add('tab-border-bottom-container');
+		const tabBorderBottomContainer = $('.tab-border-bottom-container');
 		tabContainer.appendChild(tabBorderBottomContainer);
 
 		// Eventing
 		const eventsDisposable = this.registerTabListeners(tabContainer, tabIndex, tabsContainer, tabsScrollbar);
 
-		this.tabDisposables.push(combinedDisposable(eventsDisposable, tabActionBarDisposable, tabActionRunner, editorLabel));
+		this.tabDisposables.push(combinedDisposable(gestureDisposable, eventsDisposable, tabActionBarDisposable, editorLabel));
 
 		return tabContainer;
 	}
@@ -853,15 +1076,16 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		// Given a `tabIndex` that is relative to the tabs model
 		// returns the `editorIndex` relative to the entire group
 
-		const editor = assertIsDefined(this.tabsModel.getEditorByIndex(tabIndex));
+		const editor = assertReturnsDefined(this.tabsModel.getEditorByIndex(tabIndex));
 
 		return this.groupView.getIndexOfEditor(editor);
 	}
 
+	private lastSingleSelectSelectedEditor: EditorInput | undefined;
 	private registerTabListeners(tab: HTMLElement, tabIndex: number, tabsContainer: HTMLElement, tabsScrollbar: ScrollableElement): IDisposable {
 		const disposables = new DisposableStore();
 
-		const handleClickOrTouch = (e: MouseEvent | GestureEvent, preserveFocus: boolean): void => {
+		const handleClickOrTouch = async (e: MouseEvent | GestureEvent, preserveFocus: boolean): Promise<void> => {
 			tab.blur(); // prevent flicker of focus outline on tab until editor got focus
 
 			if (isMouseEvent(e) && (e.button !== 0 /* middle/right mouse button */ || (isMacintosh && e.ctrlKey /* macOS context menu */))) {
@@ -869,7 +1093,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 					e.preventDefault(); // required to prevent auto-scrolling (https://github.com/microsoft/vscode/issues/16690)
 				}
 
-				return undefined;
+				return;
 			}
 
 			if (this.originatesFromTabActionBar(e)) {
@@ -879,11 +1103,34 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			// Open tabs editor
 			const editor = this.tabsModel.getEditorByIndex(tabIndex);
 			if (editor) {
-				// Even if focus is preserved make sure to activate the group.
-				this.groupView.openEditor(editor, { preserveFocus, activation: EditorActivation.ACTIVATE });
+				if (e.shiftKey) {
+					let anchor: EditorInput;
+					if (this.lastSingleSelectSelectedEditor && this.tabsModel.isSelected(this.lastSingleSelectSelectedEditor)) {
+						// The last selected editor is the anchor
+						anchor = this.lastSingleSelectSelectedEditor;
+					} else {
+						// The active editor is the anchor
+						const activeEditor = assertReturnsDefined(this.groupView.activeEditor);
+						this.lastSingleSelectSelectedEditor = activeEditor;
+						anchor = activeEditor;
+					}
+					await this.selectEditorsBetween(editor, anchor);
+				} else if ((e.ctrlKey && !isMacintosh) || (e.metaKey && isMacintosh)) {
+					if (this.tabsModel.isSelected(editor)) {
+						await this.unselectEditor(editor);
+					} else {
+						await this.selectEditor(editor);
+						this.lastSingleSelectSelectedEditor = editor;
+					}
+				} else {
+					// Even if focus is preserved make sure to activate the group.
+					// If a new active editor is selected, keep the current selection on key
+					// down such that drag and drop can operate over the selection. The selection
+					// is removed on key up in this case.
+					const inactiveSelection = this.tabsModel.isSelected(editor) ? this.groupView.selectedEditors.filter(e => !e.matches(editor)) : [];
+					await this.groupView.openEditor(editor, { preserveFocus, activation: EditorActivation.ACTIVATE }, { inactiveSelection, focusTabControl: true });
+				}
 			}
-
-			return undefined;
 		};
 
 		const showContextMenu = (e: Event) => {
@@ -899,16 +1146,42 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		disposables.add(addDisposableListener(tab, EventType.MOUSE_DOWN, e => handleClickOrTouch(e, false)));
 		disposables.add(addDisposableListener(tab, TouchEventType.Tap, (e: GestureEvent) => handleClickOrTouch(e, true))); // Preserve focus on touch #125470
 
+		// Track hover so the Alt-hold "Close Others" action swap (see redrawTabAction())
+		// only applies to the tab the mouse is currently over.
+		disposables.add(addDisposableListener(tab, EventType.MOUSE_ENTER, () => {
+			this.freezeFitTabWidthWithoutReservedActions(tab);
+			this.setHoveredTab(tabIndex);
+		}));
+		disposables.add(addDisposableListener(tab, EventType.FOCUS, () => this.freezeFitTabWidthWithoutReservedActions(tab), true));
+		disposables.add(addDisposableListener(tab, EventType.MOUSE_LEAVE, () => {
+			if (this.hoveredTabIndex === tabIndex) {
+				this.setHoveredTab(undefined);
+			}
+		}));
+
 		// Touch Scroll Support
 		disposables.add(addDisposableListener(tab, TouchEventType.Change, (e: GestureEvent) => {
 			tabsScrollbar.setScrollPosition({ scrollLeft: tabsScrollbar.getScrollPosition().scrollLeft - e.translationX });
 		}));
 
-		// Prevent flicker of focus outline on tab until editor got focus
-		disposables.add(addDisposableListener(tab, EventType.MOUSE_UP, e => {
+		// Update selection & prevent flicker of focus outline on tab until editor got focus
+		disposables.add(addDisposableListener(tab, EventType.MOUSE_UP, async e => {
 			EventHelper.stop(e);
 
 			tab.blur();
+
+			if (isMouseEvent(e) && (e.button !== 0 /* middle/right mouse button */ || (isMacintosh && e.ctrlKey /* macOS context menu */))) {
+				return;
+			}
+
+			if (this.originatesFromTabActionBar(e)) {
+				return; // not when clicking on actions
+			}
+
+			const isCtrlCmd = (e.ctrlKey && !isMacintosh) || (e.metaKey && isMacintosh);
+			if (!isCtrlCmd && !e.shiftKey && this.groupView.selectedEditors.length > 1) {
+				await this.unselectAllEditors();
+			}
 		}));
 
 		// Close on mouse middle click
@@ -918,7 +1191,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 				const editor = this.tabsModel.getEditorByIndex(tabIndex);
 				if (editor) {
-					if (preventEditorClose(this.tabsModel, editor, EditorCloseMethod.MOUSE, this.groupsView.partOptions)) {
+					if (editor.hasCapability(EditorInputCapabilities.CannotClose) || preventEditorClose(this.tabsModel, editor, EditorCloseMethod.MOUSE, this.groupsView.partOptions)) {
 						return;
 					}
 
@@ -1025,6 +1298,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 		// Drag & Drop support
 		let lastDragEvent: DragEvent | undefined = undefined;
+		let isNewWindowOperation = false;
 		disposables.add(new DragAndDropObserver(tab, {
 			onDragStart: e => {
 				const editor = this.tabsModel.getEditorByIndex(tabIndex);
@@ -1032,18 +1306,34 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 					return;
 				}
 
-				this.editorTransfer.setData([new DraggedEditorIdentifier({ editor, groupId: this.groupView.id })], DraggedEditorIdentifier.prototype);
+				isNewWindowOperation = this.isNewWindowOperation(e);
+				const selectedEditors = this.groupView.selectedEditors;
+				this.editorTransfer.setData(selectedEditors.map(e => new DraggedEditorIdentifier({ editor: e, groupId: this.groupView.id })), DraggedEditorIdentifier.prototype);
 
 				if (e.dataTransfer) {
 					e.dataTransfer.effectAllowed = 'copyMove';
+					if (selectedEditors.length > 1) {
+						const label = `${editor.getName()} + ${selectedEditors.length - 1}`;
+						applyDragImage(e, tab, label);
+					} else {
+						const options = this.groupsView.partOptions;
+						const isTabSticky = this.tabsModel.isSticky(tabIndex);
+						const isShrinkSizing = options.tabSizing === 'shrink' || (isTabSticky && options.pinnedTabSizing === 'shrink');
+						if (isShrinkSizing) {
+							// When tab sizing is 'shrink', the tab label may be truncated. Using the tab DOM element
+							// as a drag image can cause parts of the tab header UI to visually drag along.
+							// Instead, use a clean text-only drag image with the editor name.
+							applyDragImage(e, tab, editor.getName());
+						} else {
+							e.dataTransfer.setDragImage(tab, 0, 0); // top left corner of dragged tab set to cursor position to make room for drop-border feedback
+						}
+					}
 				}
 
 				// Apply some datatransfer types to allow for dragging the element outside of the application
-				this.doFillResourceDataTransfers([editor], e);
+				this.doFillResourceDataTransfers(selectedEditors, e, isNewWindowOperation);
 
-				// Fixes https://github.com/microsoft/vscode/issues/18733
-				tab.classList.add('dragged');
-				scheduleAtNextAnimationFrame(getWindow(tab), () => tab.classList.remove('dragged'));
+				scheduleAtNextAnimationFrame(getWindow(this.parent), () => this.updateDropFeedback(tab, false, e, tabIndex));
 			},
 
 			onDrag: e => {
@@ -1051,9 +1341,6 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			},
 
 			onDragEnter: e => {
-
-				// Update class to signal drag operation
-				tab.classList.add('dragged-over');
 
 				// Return if transfer is unsupported
 				if (!this.isSupportedDropTransfer(e)) {
@@ -1064,84 +1351,67 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 					return;
 				}
 
-				// Return if dragged editor is the current tab dragged over
-				let isLocalDragAndDrop = false;
-				if (this.editorTransfer.hasData(DraggedEditorIdentifier.prototype)) {
-					isLocalDragAndDrop = true;
-
-					const data = this.editorTransfer.getData(DraggedEditorIdentifier.prototype);
-					if (Array.isArray(data)) {
-						const localDraggedEditor = data[0].identifier;
-						if (localDraggedEditor.editor === this.tabsModel.getEditorByIndex(tabIndex) && localDraggedEditor.groupId === this.groupView.id) {
-							if (e.dataTransfer) {
-								e.dataTransfer.dropEffect = 'none';
-							}
-
-							return;
-						}
-					}
-				}
-
 				// Update the dropEffect to "copy" if there is no local data to be dragged because
 				// in that case we can only copy the data into and not move it from its source
-				if (!isLocalDragAndDrop) {
+				if (!this.editorTransfer.hasData(DraggedEditorIdentifier.prototype)) {
 					if (e.dataTransfer) {
 						e.dataTransfer.dropEffect = 'copy';
 					}
 				}
 
-				this.updateDropFeedback(tab, true, tabIndex);
+				this.updateDropFeedback(tab, true, e, tabIndex);
 			},
 
-			onDragOver: (_, dragDuration) => {
+			onDragOver: (e, dragDuration) => {
 				if (dragDuration >= MultiEditorTabsControl.DRAG_OVER_OPEN_TAB_THRESHOLD) {
 					const draggedOverTab = this.tabsModel.getEditorByIndex(tabIndex);
 					if (draggedOverTab && this.tabsModel.activeEditor !== draggedOverTab) {
 						this.groupView.openEditor(draggedOverTab, { preserveFocus: true });
 					}
 				}
-			},
 
-			onDragLeave: () => {
-				tab.classList.remove('dragged-over');
-				this.updateDropFeedback(tab, false, tabIndex);
+				this.updateDropFeedback(tab, true, e, tabIndex);
 			},
 
 			onDragEnd: async e => {
-				tab.classList.remove('dragged-over');
-				this.updateDropFeedback(tab, false, tabIndex);
-
+				this.updateDropFeedback(tab, false, e, tabIndex);
+				const draggedEditors = this.editorTransfer.getData(DraggedEditorIdentifier.prototype);
 				this.editorTransfer.clearData(DraggedEditorIdentifier.prototype);
 
-				const editor = this.tabsModel.getEditorByIndex(tabIndex);
 				if (
-					!this.isNewWindowOperation(lastDragEvent ?? e) ||
+					!isNewWindowOperation ||
 					isWindowDraggedOver() ||
-					!editor
+					!draggedEditors ||
+					draggedEditors.length === 0
 				) {
 					return; // drag to open in new window is disabled
 				}
 
-				const auxiliaryEditorPart = await this.maybeCreateAuxiliaryEditorPartAt(e, tab);
-				if (!auxiliaryEditorPart) {
-					return;
-				}
+				// Only the dragged editors are asked whether they can go: others of the group stay where they are
+				const editors = draggedEditors.map(editor => editor.identifier.editor);
+				const copy = this.isCopyIntoOtherGroup(lastDragEvent ?? e, editors[0]);
+				await this.transferToNewWindowAt(e, tab, target => getEditorsTransferVeto(editors, this.groupView.id, target, { copy }), targetGroup => {
+					const editorsWithOptions = prepareMoveCopyEditors(this.groupView, editors);
+					if (copy) {
+						this.groupView.copyEditors(editorsWithOptions, targetGroup);
+					} else {
+						this.groupView.moveEditors(editorsWithOptions, targetGroup);
+					}
 
-				const targetGroup = auxiliaryEditorPart.activeGroup;
-				if (this.isMoveOperation(lastDragEvent ?? e, targetGroup.id, editor)) {
-					this.groupView.moveEditor(editor, targetGroup);
-				} else {
-					this.groupView.copyEditor(editor, targetGroup);
-				}
-
-				targetGroup.focus();
+					targetGroup.focus();
+				});
 			},
 
 			onDrop: e => {
-				tab.classList.remove('dragged-over');
-				this.updateDropFeedback(tab, false, tabIndex);
+				this.updateDropFeedback(tab, false, e, tabIndex);
 
-				this.onDrop(e, tabIndex, tabsContainer);
+				// compute the target index
+				let targetIndex = tabIndex;
+				if (this.getTabDragOverLocation(e, tab) === 'right') {
+					targetIndex++;
+				}
+
+				this.onDrop(e, targetIndex, tabsContainer);
 			}
 		}));
 
@@ -1151,7 +1421,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 	private isSupportedDropTransfer(e: DragEvent): boolean {
 		if (this.groupTransfer.hasData(DraggedEditorGroupIdentifier.prototype)) {
 			const data = this.groupTransfer.getData(DraggedEditorGroupIdentifier.prototype);
-			if (Array.isArray(data)) {
+			if (Array.isArray(data) && data.length > 0) {
 				const group = data[0];
 				if (group.identifier === this.groupView.id) {
 					return false; // groups cannot be dropped on group it originates from
@@ -1172,27 +1442,168 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		return false;
 	}
 
-	private updateDropFeedback(element: HTMLElement, isDND: boolean, tabIndex?: number): void {
+	/**
+	 * Whether dragging over the event's target drops after the last tab: the empty space of the tabs container and the
+	 * add tab button after the last tab.
+	 */
+	private isDropAfterLastTabTarget(e: DragEvent, tabsContainer: HTMLElement): boolean {
+		return e.target === tabsContainer || (!!this.addTabContainer && isHTMLElement(e.target) && this.addTabContainer.contains(e.target));
+	}
+
+	private updateDropFeedback(element: HTMLElement, isDND: boolean, e: DragEvent, tabIndex?: number): void {
 		const isTab = (typeof tabIndex === 'number');
-		const editor = typeof tabIndex === 'number' ? this.tabsModel.getEditorByIndex(tabIndex) : undefined;
-		const isActiveTab = isTab && !!editor && this.tabsModel.isActive(editor);
 
-		// Background
-		const noDNDBackgroundColor = isTab ? this.getColor(isActiveTab ? TAB_ACTIVE_BACKGROUND : TAB_INACTIVE_BACKGROUND) : '';
-		element.style.backgroundColor = (isDND ? this.getColor(EDITOR_DRAG_AND_DROP_BACKGROUND) : noDNDBackgroundColor) || '';
-
-		// Outline
-		const activeContrastBorderColor = this.getColor(activeContrastBorder);
-		if (activeContrastBorderColor && isDND) {
-			element.style.outlineWidth = '2px';
-			element.style.outlineStyle = 'dashed';
-			element.style.outlineColor = activeContrastBorderColor;
-			element.style.outlineOffset = isTab ? '-5px' : '-3px';
+		let dropTarget;
+		if (isDND) {
+			if (isTab) {
+				dropTarget = this.computeDropTarget(e, tabIndex, element);
+			} else {
+				// The add tab button follows the last tab in the container
+				dropTarget = { leftElement: this.getLastTab(), rightElement: undefined };
+			}
 		} else {
-			element.style.outlineWidth = '';
-			element.style.outlineStyle = '';
-			element.style.outlineColor = activeContrastBorderColor || '';
-			element.style.outlineOffset = '';
+			dropTarget = undefined;
+		}
+
+		this.updateDropTarget(dropTarget);
+	}
+
+	private dropTarget: { leftElement: HTMLElement | undefined; rightElement: HTMLElement | undefined } | undefined;
+	private updateDropTarget(newTarget: { leftElement: HTMLElement | undefined; rightElement: HTMLElement | undefined } | undefined): void {
+		const oldTargets = this.dropTarget;
+		if (oldTargets === newTarget || oldTargets && newTarget && oldTargets.leftElement === newTarget.leftElement && oldTargets.rightElement === newTarget.rightElement) {
+			return;
+		}
+
+		const dropClassLeft = 'drop-target-left';
+		const dropClassRight = 'drop-target-right';
+
+		if (oldTargets) {
+			oldTargets.leftElement?.classList.remove(dropClassLeft);
+			oldTargets.rightElement?.classList.remove(dropClassRight);
+		}
+
+		if (newTarget) {
+			newTarget.leftElement?.classList.add(dropClassLeft);
+			newTarget.rightElement?.classList.add(dropClassRight);
+		}
+
+		this.dropTarget = newTarget;
+	}
+
+	private getTabDragOverLocation(e: DragEvent, tab: HTMLElement): 'left' | 'right' {
+		const rect = tab.getBoundingClientRect();
+		const offsetXRelativeToParent = e.clientX - rect.left;
+
+		return offsetXRelativeToParent <= rect.width / 2 ? 'left' : 'right';
+	}
+
+	private computeDropTarget(e: DragEvent, tabIndex: number, targetTab: HTMLElement): { leftElement: HTMLElement | undefined; rightElement: HTMLElement | undefined } | undefined {
+		const isLeftSideOfTab = this.getTabDragOverLocation(e, targetTab) === 'left';
+		const isLastTab = tabIndex === this.tabsModel.count - 1;
+		const isFirstTab = tabIndex === 0;
+
+		// Before first tab
+		if (isLeftSideOfTab && isFirstTab) {
+			return { leftElement: undefined, rightElement: targetTab };
+		}
+
+		// After last tab
+		if (!isLeftSideOfTab && isLastTab) {
+			return { leftElement: targetTab, rightElement: undefined };
+		}
+
+		// Between two tabs
+		const tabBefore = isLeftSideOfTab ? targetTab.previousElementSibling : targetTab;
+		const tabAfter = isLeftSideOfTab ? targetTab : targetTab.nextElementSibling;
+
+		return { leftElement: tabBefore as HTMLElement, rightElement: tabAfter as HTMLElement };
+	}
+
+	private async selectEditor(editor: EditorInput): Promise<void> {
+		if (this.groupView.isActive(editor)) {
+			return;
+		}
+
+		await this.groupView.setSelection(editor, this.groupView.selectedEditors);
+	}
+
+	private async selectEditorsBetween(target: EditorInput, anchor: EditorInput): Promise<void> {
+		const editorIndex = this.groupView.getIndexOfEditor(target);
+		if (editorIndex === -1) {
+			throw new BugIndicatingError();
+		}
+
+		const anchorEditorIndex = this.groupView.getIndexOfEditor(anchor);
+		if (anchorEditorIndex === -1) {
+			throw new BugIndicatingError();
+		}
+
+		let selection = this.groupView.selectedEditors;
+
+		// Unselect editors on other side of anchor in relation to the target
+		let currentEditorIndex = anchorEditorIndex;
+		while (currentEditorIndex >= 0 && currentEditorIndex <= this.groupView.count - 1) {
+			currentEditorIndex = anchorEditorIndex < editorIndex ? currentEditorIndex - 1 : currentEditorIndex + 1;
+
+			const currentEditor = this.groupView.getEditorByIndex(currentEditorIndex);
+			if (!currentEditor) {
+				break;
+			}
+
+			if (!this.groupView.isSelected(currentEditor)) {
+				break;
+			}
+
+			selection = selection.filter(editor => !editor.matches(currentEditor));
+		}
+
+		// Select editors between anchor and target
+		const fromEditorIndex = anchorEditorIndex < editorIndex ? anchorEditorIndex : editorIndex;
+		const toEditorIndex = anchorEditorIndex < editorIndex ? editorIndex : anchorEditorIndex;
+
+		const editorsToSelect = this.groupView.getEditors(EditorsOrder.SEQUENTIAL).slice(fromEditorIndex, toEditorIndex + 1);
+		for (const editor of editorsToSelect) {
+			if (!this.groupView.isSelected(editor)) {
+				selection.push(editor);
+			}
+		}
+
+		const inactiveSelectedEditors = selection.filter(editor => !editor.matches(target));
+		await this.groupView.setSelection(target, inactiveSelectedEditors);
+	}
+
+	private async unselectEditor(editor: EditorInput): Promise<void> {
+		const isUnselectingActiveEditor = this.groupView.isActive(editor);
+
+		// If there is only one editor selected, do not unselect it
+		if (isUnselectingActiveEditor && this.groupView.selectedEditors.length === 1) {
+			return;
+		}
+
+		let newActiveEditor = assertReturnsDefined(this.groupView.activeEditor);
+
+		// If active editor is bing unselected then find the most recently opened selected editor
+		// that is not the editor being unselected
+		if (isUnselectingActiveEditor) {
+			const recentEditors = this.groupView.getEditors(EditorsOrder.MOST_RECENTLY_ACTIVE);
+			for (let i = 1; i < recentEditors.length; i++) { // First one is the active editor
+				const recentEditor = recentEditors[i];
+				if (this.groupView.isSelected(recentEditor)) {
+					newActiveEditor = recentEditor;
+					break;
+				}
+			}
+		}
+
+		const inactiveSelectedEditors = this.groupView.selectedEditors.filter(e => !e.matches(editor) && !e.matches(newActiveEditor));
+		await this.groupView.setSelection(newActiveEditor, inactiveSelectedEditors);
+	}
+
+	private async unselectAllEditors(): Promise<void> {
+		if (this.groupView.selectedEditors.length > 1) {
+			const activeEditor = assertReturnsDefined(this.groupView.activeEditor);
+			await this.groupView.setSelection(activeEditor, []);
 		}
 	}
 
@@ -1345,21 +1756,24 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		this.layout(this.dimensions, options);
 	}
 
-	private redrawTab(editor: EditorInput, tabIndex: number, tabContainer: HTMLElement, tabLabelWidget: IResourceLabel, tabLabel: IEditorInputLabel, tabActionBar: ActionBar): void {
+	// Split out from redrawTab() so updateTabActionsForAltState() can refresh just the action items, not a full tab bar redraw.
+	private redrawTabAction(editor: EditorInput, tabIndex: number, tabContainer: HTMLElement, tabActionBar: ActionBar): void {
 		const isTabSticky = this.tabsModel.isSticky(tabIndex);
+		const isCloseable = !editor.hasCapability(EditorInputCapabilities.CannotClose);
 		const options = this.groupsView.partOptions;
 
-		// Label
-		this.redrawTabLabel(editor, tabIndex, tabContainer, tabLabelWidget, tabLabel);
-
-		// Action
 		const hasUnpinAction = isTabSticky && options.tabActionUnpinVisibility;
-		const hasCloseAction = !hasUnpinAction && options.tabActionCloseVisibility;
+		const hasCloseAction = isCloseable && !hasUnpinAction && options.tabActionCloseVisibility;
 		const hasAction = hasUnpinAction || hasCloseAction;
+
+		// Alt swaps a visible Close action to Close Others, but only for the
+		// currently hovered tab; Unpin is unaffected.
+		const wantsCloseOthersAction = hasCloseAction && this.isAltPressed && tabIndex === this.hoveredTabIndex;
+		this.closeOtherEditorTabsInGroupAction.enabled = this.groupView.count > 1;
 
 		let tabAction;
 		if (hasAction) {
-			tabAction = hasUnpinAction ? this.unpinEditorAction : this.closeEditorAction;
+			tabAction = hasUnpinAction ? this.unpinEditorAction : wantsCloseOthersAction ? this.closeOtherEditorTabsInGroupAction : this.closeEditorAction;
 		} else {
 			// Even if the action is not visible, add it as it contains the dirty indicator
 			tabAction = isTabSticky ? this.unpinEditorAction : this.closeEditorAction;
@@ -1370,15 +1784,29 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 				tabActionBar.clear();
 			}
 
-			tabActionBar.push(tabAction, { icon: true, label: false, keybinding: this.getKeybindingLabel(tabAction) });
+			// Close Others has no real keybinding to look up; hint at the gesture that triggers it instead.
+			const keybinding = tabAction === this.closeOtherEditorTabsInGroupAction ? (isMacintosh ? localize('altClickMac', "⌥+Click") : localize('altClick', "Alt+Click")) : this.getKeybindingLabel(tabAction);
+			tabActionBar.push(tabAction, { icon: true, label: false, keybinding });
 		}
 
 		tabContainer.classList.toggle(`pinned-action-off`, isTabSticky && !hasUnpinAction);
 		tabContainer.classList.toggle(`close-action-off`, !hasUnpinAction && !hasCloseAction);
+		tabContainer.classList.toggle('cannot-close', !isCloseable);
 
 		for (const option of ['left', 'right']) {
 			tabContainer.classList.toggle(`tab-actions-${option}`, hasAction && options.tabActionLocation === option);
 		}
+	}
+
+	private redrawTab(editor: EditorInput, tabIndex: number, tabContainer: HTMLElement, tabLabelWidget: IResourceLabel, tabLabel: IEditorInputLabel, tabActionBar: ActionBar): void {
+		const isTabSticky = this.tabsModel.isSticky(tabIndex);
+		const options = this.groupsView.partOptions;
+
+		// Label
+		this.redrawTabLabel(editor, tabIndex, tabContainer, tabLabelWidget, tabLabel);
+
+		// Action
+		this.redrawTabAction(editor, tabIndex, tabContainer, tabActionBar);
 
 		const tabSizing = isTabSticky && options.pinnedTabSizing === 'shrink' ? 'shrink' /* treat sticky shrink tabs as tabSizing: 'shrink' */ : options.tabSizing;
 		for (const option of ['fit', 'shrink', 'fixed']) {
@@ -1395,17 +1823,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		// If not wrapping tabs, sticky compact/shrink tabs need a position to remain at their location
 		// when scrolling to stay in view (requirement for position: sticky)
 		if (!options.wrapTabs && isTabSticky && options.pinnedTabSizing !== 'normal') {
-			let stickyTabWidth = 0;
-			switch (options.pinnedTabSizing) {
-				case 'compact':
-					stickyTabWidth = MultiEditorTabsControl.TAB_WIDTH.compact;
-					break;
-				case 'shrink':
-					stickyTabWidth = MultiEditorTabsControl.TAB_WIDTH.shrink;
-					break;
-			}
-
-			tabContainer.style.left = `${tabIndex * stickyTabWidth}px`;
+			tabContainer.style.left = `${tabIndex * this.getStickyTabWidth(options.pinnedTabSizing)}px`;
 		} else {
 			tabContainer.style.left = 'auto';
 		}
@@ -1413,19 +1831,22 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		// Borders / outline
 		this.redrawTabBorders(tabIndex, tabContainer);
 
-		// Active / dirty state
-		this.redrawTabActiveAndDirty(this.groupsView.activeGroup === this.groupView, editor, tabContainer, tabActionBar);
+		// Selection / active / dirty state
+		this.redrawTabSelectedActiveAndDirty(this.groupsView.activeGroup === this.groupView, editor, tabContainer, tabActionBar);
 	}
 
 	private redrawTabLabel(editor: EditorInput, tabIndex: number, tabContainer: HTMLElement, tabLabelWidget: IResourceLabel, tabLabel: IEditorInputLabel): void {
+		tabContainer.style.removeProperty('--tab-sizing-fit-width');
 		const options = this.groupsView.partOptions;
 
 		// Unless tabs are sticky compact, show the full label and description
 		// Sticky compact tabs will only show an icon if icons are enabled
 		// or their first character of the name otherwise
 		let name: string | undefined;
+		let namePrefix: string | undefined;
 		let forceLabel = false;
 		let fileDecorationBadges = Boolean(options.decorations?.badges);
+		const fileDecorationColors = Boolean(options.decorations?.colors);
 		let description: string;
 		if (options.pinnedTabSizing === 'compact' && this.tabsModel.isSticky(tabIndex)) {
 			const isShowingIcons = options.showIcons && options.hasIcons;
@@ -1435,6 +1856,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			fileDecorationBadges = false; // not enough space when sticky tabs are compact
 		} else {
 			name = tabLabel.name;
+			namePrefix = options.showTabIndex ? `${this.toEditorIndex(tabIndex) + 1}: ` : undefined;
 			description = tabLabel.description || '';
 		}
 
@@ -1445,26 +1867,26 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			tabContainer.setAttribute('aria-description', '');
 		}
 
-		const title = tabLabel.title || '';
-		tabContainer.title = title;
-
 		// Label
+		const resource = EditorResourceAccessor.getOriginalUri(editor, { supportSideBySide: SideBySideEditor.PRIMARY });
 		tabLabelWidget.setResource(
 			{ name, description, resource: EditorResourceAccessor.getOriginalUri(editor, { supportSideBySide: SideBySideEditor.BOTH }) },
 			{
-				title,
+				title: this.getHoverTitle(editor),
 				extraClasses: coalesce(['tab-label', fileDecorationBadges ? 'tab-label-has-badge' : undefined].concat(editor.getLabelExtraClasses())),
 				italic: !this.tabsModel.isPinned(editor),
 				forceLabel,
 				fileDecorations: {
-					colors: Boolean(options.decorations?.colors),
+					colors: fileDecorationColors,
 					badges: fileDecorationBadges
-				}
+				},
+				icon: editor.getIcon(),
+				hideIcon: options.showIcons === false,
+				namePrefix,
 			}
 		);
 
 		// Tests helper
-		const resource = EditorResourceAccessor.getOriginalUri(editor, { supportSideBySide: SideBySideEditor.PRIMARY });
 		if (resource) {
 			tabContainer.setAttribute('data-resource-name', basenameOrAuthority(resource));
 		} else {
@@ -1472,7 +1894,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		}
 	}
 
-	private redrawTabActiveAndDirty(isGroupActive: boolean, editor: EditorInput, tabContainer: HTMLElement, tabActionBar: ActionBar): void {
+	private redrawTabSelectedActiveAndDirty(isGroupActive: boolean, editor: EditorInput, tabContainer: HTMLElement, tabActionBar: ActionBar): void {
 		const isTabActive = this.tabsModel.isActive(editor);
 		const hasModifiedBorderTop = this.doRedrawTabDirty(isGroupActive, isTabActive, editor, tabContainer);
 
@@ -1480,57 +1902,43 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 	}
 
 	private doRedrawTabActive(isGroupActive: boolean, allowBorderTop: boolean, editor: EditorInput, tabContainer: HTMLElement, tabActionBar: ActionBar): void {
+		const isActive = this.tabsModel.isActive(editor);
+		const isSelected = this.tabsModel.isSelected(editor);
 
-		// Tab is active
-		if (this.tabsModel.isActive(editor)) {
+		tabContainer.classList.toggle('active', isActive);
+		tabContainer.classList.toggle('selected', isSelected);
+		tabContainer.classList.toggle('multi-selected', isSelected && this.groupView.selectedEditors.length > 1);
+		tabContainer.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+		tabContainer.tabIndex = isActive ? 0 : -1; // Only active tab can be focused into
+		tabActionBar.setFocusable(isActive);
 
-			// Container
-			tabContainer.classList.add('active');
-			tabContainer.setAttribute('aria-selected', 'true');
-			tabContainer.tabIndex = 0; // Only active tab can be focused into
-			tabContainer.style.backgroundColor = this.getColor(isGroupActive ? TAB_ACTIVE_BACKGROUND : TAB_UNFOCUSED_ACTIVE_BACKGROUND) || '';
-
-			const activeTabBorderColorBottom = this.getColor(isGroupActive ? TAB_ACTIVE_BORDER : TAB_UNFOCUSED_ACTIVE_BORDER);
-			if (activeTabBorderColorBottom) {
-				tabContainer.classList.add('tab-border-bottom');
-				tabContainer.style.setProperty('--tab-border-bottom-color', activeTabBorderColorBottom.toString());
-			} else {
-				tabContainer.classList.remove('tab-border-bottom');
-				tabContainer.style.removeProperty('--tab-border-bottom-color');
-			}
-
-			const activeTabBorderColorTop = allowBorderTop ? this.getColor(isGroupActive ? TAB_ACTIVE_BORDER_TOP : TAB_UNFOCUSED_ACTIVE_BORDER_TOP) : undefined;
-			if (activeTabBorderColorTop) {
-				tabContainer.classList.add('tab-border-top');
-				tabContainer.style.setProperty('--tab-border-top-color', activeTabBorderColorTop.toString());
-			} else {
-				tabContainer.classList.remove('tab-border-top');
-				tabContainer.style.removeProperty('--tab-border-top-color');
-			}
-
-			// Label
-			tabContainer.style.color = this.getColor(isGroupActive ? TAB_ACTIVE_FOREGROUND : TAB_UNFOCUSED_ACTIVE_FOREGROUND) || '';
-
-			// Actions
-			tabActionBar.setFocusable(true);
+		// Set border BOTTOM if theme defined color
+		if (isActive) {
+			const activeTabBorderBottom = this.theme.getColor(isGroupActive ? TAB_ACTIVE_BORDER : TAB_UNFOCUSED_ACTIVE_BORDER);
+			const activeTabBorderColorBottom = activeTabBorderBottom?.toString();
+			tabContainer.classList.toggle('tab-border-bottom', !!activeTabBorderColorBottom);
+			// A theme whose active tab border has the editor's background color, at any opacity, joins the tab to its editor:
+			// with connected tabs, it joins the surface the tab flows into, which a part whose editors have a surface of their
+			// own sets.
+			const editorBackgroundColor = this.theme.getColor(editorBackground);
+			const joinsEditor = !!activeTabBorderBottom && !!editorBackgroundColor && activeTabBorderBottom.rgba.r === editorBackgroundColor.rgba.r && activeTabBorderBottom.rgba.g === editorBackgroundColor.rgba.g && activeTabBorderBottom.rgba.b === editorBackgroundColor.rgba.b;
+			tabContainer.style.setProperty('--tab-border-bottom-color', joinsEditor ? `var(--modern-ui-connected-tab-surface, ${activeTabBorderColorBottom})` : activeTabBorderColorBottom ?? '');
 		}
 
-		// Tab is inactive
-		else {
+		// Set border TOP if theme defined color
+		let tabBorderColorTop: string | null = null;
+		if (allowBorderTop) {
+			if (isActive) {
+				tabBorderColorTop = this.getColor(isGroupActive ? TAB_ACTIVE_BORDER_TOP : TAB_UNFOCUSED_ACTIVE_BORDER_TOP);
+			}
 
-			// Container
-			tabContainer.classList.remove('active');
-			tabContainer.setAttribute('aria-selected', 'false');
-			tabContainer.tabIndex = -1; // Only active tab can be focused into
-			tabContainer.style.backgroundColor = this.getColor(isGroupActive ? TAB_INACTIVE_BACKGROUND : TAB_UNFOCUSED_INACTIVE_BACKGROUND) || '';
-			tabContainer.style.boxShadow = '';
-
-			// Label
-			tabContainer.style.color = this.getColor(isGroupActive ? TAB_INACTIVE_FOREGROUND : TAB_UNFOCUSED_INACTIVE_FOREGROUND) || '';
-
-			// Actions
-			tabActionBar.setFocusable(false);
+			if (tabBorderColorTop === null && isSelected) {
+				tabBorderColorTop = this.getColor(TAB_SELECTED_BORDER_TOP);
+			}
 		}
+
+		tabContainer.classList.toggle('tab-border-top', !!tabBorderColorTop);
+		tabContainer.style.setProperty('--tab-border-top-color', tabBorderColorTop ?? '');
 	}
 
 	private doRedrawTabDirty(isGroupActive: boolean, isTabActive: boolean, editor: EditorInput, tabContainer: HTMLElement): boolean {
@@ -1558,6 +1966,9 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 					tabContainer.classList.add('dirty-border-top');
 					tabContainer.style.setProperty('--tab-dirty-border-top-color', modifiedBorderColor);
+				} else {
+					tabContainer.classList.remove('dirty-border-top');
+					tabContainer.style.removeProperty('--tab-dirty-border-top-color');
 				}
 			} else {
 				tabContainer.classList.remove('dirty-border-top');
@@ -1596,10 +2007,14 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		// Inactive: only show "Unlock" and secondary actions
 		else {
 			return {
-				primary: editorActions.primary.filter(action => action.id === UNLOCK_GROUP_COMMAND_ID),
+				primary: this.groupsView.partOptions.alwaysShowEditorActions ? editorActions.primary : editorActions.primary.filter(action => action.id === UNLOCK_GROUP_COMMAND_ID),
 				secondary: editorActions.secondary
 			};
 		}
+	}
+
+	protected override prepareEditorLayoutActions(editorActions: IToolbarActions): IToolbarActions {
+		return editorActions;
 	}
 
 	getHeight(): number {
@@ -1620,9 +2035,10 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 		if (!this.visible) {
 			height = 0;
-		} else if (this.groupsView.partOptions.wrapTabs && this.tabsAndActionsContainer?.classList.contains('wrapping')) {
-			// Wrap: we need to ask `offsetHeight` to get
-			// the real height of the title area with wrapping.
+		} else if (
+			(this.groupsView.partOptions.wrapTabs && this.tabsAndActionsContainer?.classList.contains('wrapping')) ||
+			(this.parent.closest(CONNECTED_EDITOR_TABS_SELECTOR) && this.tabsAndActionsContainer)
+		) {
 			height = this.tabsAndActionsContainer.offsetHeight;
 		} else {
 			height = this.tabHeight;
@@ -1644,20 +2060,12 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 				// this a little bit we try at least to schedule this work on the next animation frame
 				// when we have restored or when idle otherwise.
 
-				const layoutFunction = () => {
+				const disposable = scheduleAtNextAnimationFrame(getWindow(this.parent), () => {
 					this.doLayout(this.dimensions, this.layoutScheduler.value?.options /* ensure to pick up latest options */);
 
 					this.layoutScheduler.clear();
-				};
-
-				let scheduledLayout: IDisposable;
-				if (this.lifecycleService.phase >= LifecyclePhase.Restored) {
-					scheduledLayout = scheduleAtNextAnimationFrame(getWindow(this.tabsContainer), layoutFunction);
-				} else {
-					scheduledLayout = runWhenWindowIdle(getWindow(this.tabsContainer), layoutFunction);
-				}
-
-				this.layoutScheduler.value = { options, dispose: () => scheduledLayout.dispose() };
+				});
+				this.layoutScheduler.value = { options, dispose: () => disposable.dispose() };
 			}
 
 			// Make sure to keep options updated
@@ -1691,8 +2099,8 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		const newDimension = this.dimensions.used = new Dimension(dimensions.container.width, this.computeHeight());
 
 		// In case the height of the title control changed from before
-		// (currently only possible if wrapping changed on/off), we need
-		// to signal this to the outside via a `relayout` call so that
+		// (e.g. when wrapping toggles on/off or the tab height setting changes),
+		// we need to signal this to the outside via a `relayout` call so that
 		// e.g. the editor control can be adjusted accordingly.
 		if (oldDimension && oldDimension.height !== newDimension.height) {
 			this.groupView.relayout();
@@ -1700,20 +2108,137 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 	}
 
 	private doLayoutTabs(dimensions: IEditorTitleControlDimensions, options?: IMultiEditorTabsControlLayoutOptions): void {
+		const connected = Boolean(this.parent.closest(CONNECTED_EDITOR_TABS_SELECTOR));
+		const firstVisibleTabBar = Array.from(this.parent.children)
+			.filter(isHTMLElement)
+			.find(element => element.classList.contains('tabs-and-actions-container') && !element.classList.contains('empty'));
+		const topTabBar = firstVisibleTabBar === this.tabsAndActionsContainer;
+		const upperTabBar = this.parent.classList.contains('two-tab-bars') && topTabBar;
+		this.tabsAndActionsContainer?.classList.toggle('connected-tab-upper-bar', connected && upperTabBar);
+		this.forEachTab((_editor, index, tab) => {
+			tab.classList.toggle('last-tab', index === this.tabsModel.count - 1);
+			tab.classList.toggle('connected-tab-last', connected && index === this.tabsModel.count - 1);
+		});
+		this.tabsAndActionsContainer?.classList.toggle('has-add-tab', Boolean(this.addTabContainer && !this.addTabContainer.classList.contains('hidden')));
+		if (connected && upperTabBar) {
+			this.forEachTab((_editor, _index, tab) => tab.classList.add('connected-tab-upper-row'));
+		}
+		this.parent.classList.toggle('connected-tabs-labels', connected);
+		if (connected !== this.connectedTabLabels) {
+			this.connectedTabLabels = connected;
+			this.forEachTab((editor, index, tab, widget, label) => this.redrawTabLabel(editor, index, tab, widget, label));
+		}
+		this.layoutFitTabsWithoutReservedActions();
 
 		// Always first layout tabs with wrapping support even if wrapping
 		// is disabled. The result indicates if tabs wrap and if not, we
 		// need to proceed with the layout without wrapping because even
 		// if wrapping is enabled in settings, there are cases where
 		// wrapping is disabled (e.g. due to space constraints)
+		// The wrapping layout measures the tabs without the Add Tab control following the last tab, see below
+		this.tabsAndActionsContainer?.classList.remove('add-tab-follows-last-tab');
 		const tabsWrapMultiLine = this.doLayoutTabsWrapping(dimensions);
+		this.layoutAddTabWithLastTab(tabsWrapMultiLine);
+		const top = this.getTabAtIndex(0)?.offsetTop;
+		const bottom = tabsWrapMultiLine && this.addTabContainer && !this.addTabContainer.classList.contains('hidden') ? this.addTabContainer.offsetTop : this.getLastTab()?.offsetTop;
+		this.forEachTab((_editor, _index, tab) => {
+			tab.classList.toggle('connected-tab-upper-row', connected && (upperTabBar || tab.offsetTop !== bottom));
+			tab.classList.toggle('connected-tab-top-row', connected && topTabBar && tab.offsetTop === top);
+		});
+		this.updateWrappedAddTabAlignment(tabsWrapMultiLine);
+		const connectedTabsWrapping = connected && Array.from(this.parent.children).some(element =>
+			isHTMLElement(element) &&
+			element.classList.contains('tabs-and-actions-container') &&
+			element.classList.contains('wrapping')
+		);
+		this.parent.classList.toggle('connected-tabs-wrapping', connectedTabsWrapping);
+		const overflow = connected && tabsWrapMultiLine ? 'visible' : 'hidden';
+		assertReturnsDefined(this.tabsContainer).style.overflow = overflow;
+		assertReturnsDefined(this.tabsScrollbar).getDomNode().style.overflow = overflow;
 		if (!tabsWrapMultiLine) {
 			this.doLayoutTabsNonWrapping(options);
+		} else {
+			assertReturnsDefined(this.stickyTabsBackground).style.width = '0px';
+			this.clearConnectedTabClipping();
 		}
 	}
 
-	private doLayoutTabsWrapping(dimensions: IEditorTitleControlDimensions): boolean {
-		const [tabsAndActionsContainer, tabsContainer, editorToolbarContainer, tabsScrollbar] = assertAllDefined(this.tabsAndActionsContainer, this.tabsContainer, this.editorActionsToolbarContainer, this.tabsScrollbar);
+	private layoutFitTabsWithoutReservedActions(): void {
+		if (this.parent.classList.contains('tab-actions-reserve-space') || !this.parent.closest('.modern-ui-tabs')) {
+			this.forEachTab((_editor, _index, tab) => tab.style.removeProperty('--tab-sizing-fit-width'));
+			return;
+		}
+
+		const tabs: HTMLElement[] = [];
+		this.forEachTab((_editor, _index, tab) => {
+			if (tab.classList.contains('sizing-fit') && !tab.style.getPropertyValue('--tab-sizing-fit-width')) {
+				tab.classList.toggle('tab-action-sizing-rest', !tab.classList.contains('dirty') && !tab.classList.contains('sticky'));
+				tabs.push(tab);
+			}
+		});
+		const widths = this.getFitTabWidths(tabs);
+		for (const [index, tab] of tabs.entries()) {
+			const width = widths[index];
+			tab.style.setProperty('--tab-sizing-fit-width', `${width}px`);
+			tab.classList.remove('tab-action-sizing-rest');
+		}
+	}
+
+	private freezeFitTabWidthWithoutReservedActions(tab: HTMLElement): void {
+		if (!tab.classList.contains('sizing-fit') || tab.style.getPropertyValue('--tab-sizing-fit-width') || this.parent.classList.contains('tab-actions-reserve-space') || !this.parent.closest('.modern-ui-tabs')) {
+			return;
+		}
+
+		tab.classList.toggle('tab-action-sizing-rest', !tab.classList.contains('dirty') && !tab.classList.contains('sticky'));
+		tab.style.setProperty('--tab-sizing-fit-width', `${this.getFitTabWidths([tab])[0]}px`);
+		tab.classList.remove('tab-action-sizing-rest');
+	}
+
+	private getFitTabWidths(tabs: readonly HTMLElement[]): number[] {
+		// Cache intrinsic width, not the current wrapped row's constraint.
+		const maxWidths = tabs.map(tab => tab.style.maxWidth);
+		for (const tab of tabs) {
+			tab.style.maxWidth = 'none';
+		}
+		try {
+			return tabs.map(tab => this.getFitTabWidth(tab));
+		} finally {
+			for (const [index, tab] of tabs.entries()) {
+				tab.style.maxWidth = maxWidths[index];
+			}
+		}
+	}
+
+	private getFitTabWidth(tab: HTMLElement): number {
+		const targetWindow = getWindow(tab);
+		const style = targetWindow.getComputedStyle(tab);
+		const width = Number.parseFloat(style.width);
+		const hasPersistentAction = (tab.classList.contains('dirty') && !(tab.classList.contains('close-action-off') && tab.classList.contains('dirty-border-top'))) || (tab.classList.contains('sticky') && !tab.classList.contains('pinned-action-off'));
+		if ((tab.classList.contains('close-action-off') && !hasPersistentAction) || tab.classList.contains('sticky-compact')) {
+			return width;
+		}
+		const labelPadding = Number.parseFloat(tab.classList.contains('tab-actions-left') ? style.paddingRight : style.paddingLeft);
+		const actionPadding = Number.parseFloat(style.getPropertyValue('--modern-ui-tab-action-fit-padding')) || 28;
+		const currentActionPadding = Number.parseFloat(tab.classList.contains('tab-actions-left') ? style.paddingLeft : style.paddingRight);
+		const intrinsicWidth = hasPersistentAction ? width + Math.max(0, actionPadding - currentActionPadding) : width;
+		/* eslint-disable eslint-js/no-restricted-syntax -- IconLabel exposes its root, but not its text-layout elements. */
+		const label = tab.querySelector<HTMLElement>('.tab-label');
+		const name = label?.querySelector<HTMLElement>('.monaco-icon-name-container');
+		const labelContainer = label?.querySelector<HTMLElement>('.monaco-icon-label-container');
+		/* eslint-enable eslint-js/no-restricted-syntax */
+		const nameWidth = name ? Number.parseFloat(targetWindow.getComputedStyle(name).width) : 0;
+		const adornmentWidth = label && labelContainer ? Number.parseFloat(targetWindow.getComputedStyle(label).width) - Number.parseFloat(targetWindow.getComputedStyle(labelContainer).width) : 0;
+		const borderWidth = Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.borderRightWidth);
+		const shortNameWidth = Math.max(Number.parseFloat(style.fontSize), MultiEditorTabsControl.TAB_WIDTH.fit - labelPadding - actionPadding - adornmentWidth - borderWidth);
+		const minimumLabelWidth = adornmentWidth + Math.min(nameWidth, shortNameWidth);
+		// Keep short fit names complete without reserving the action column on naturally wider tabs.
+		return Math.max(intrinsicWidth, labelPadding + actionPadding + minimumLabelWidth + borderWidth);
+	}
+
+	private doLayoutTabsWrapping(dimensions: IEditorTitleControlDimensions, forceTabsWrapMultiLine?: boolean): boolean {
+		const [tabsAndActionsContainer, tabsContainer, editorToolbarsContainer, tabsScrollbar] = assertReturnsAllDefined(this.tabsAndActionsContainer, this.tabsContainer, this.editorToolbarsContainer, this.tabsScrollbar);
+
+		const editorToolbarWidth = () => editorToolbarsContainer.offsetWidth;
 
 		// Handle wrapping tabs according to setting:
 		// - enabled: only add class if tabs wrap and don't exceed available dimensions
@@ -1721,6 +2246,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 		const didTabsWrapMultiLine = tabsAndActionsContainer.classList.contains('wrapping');
 		let tabsWrapMultiLine = didTabsWrapMultiLine;
+		tabsContainer.style.setProperty('--last-tab-add-tab-width', `${this.addTabContainer?.offsetWidth ?? 0}px`);
 
 		function updateTabsWrapping(enabled: boolean): void {
 			tabsWrapMultiLine = enabled;
@@ -1731,20 +2257,42 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			// Update `last-tab-margin-right` CSS variable to account for the absolute
 			// positioned editor actions container when tabs wrap. The margin needs to
 			// be the width of the editor actions container to avoid screen cheese.
-			tabsContainer.style.setProperty('--last-tab-margin-right', tabsWrapMultiLine ? `${editorToolbarContainer.offsetWidth}px` : '0');
+			tabsContainer.style.setProperty('--last-tab-margin-right', tabsWrapMultiLine ? `${editorToolbarWidth()}px` : '0');
+
+			// Remove old css classes that are not needed anymore
+			for (const tab of tabsContainer.children) {
+				tab.classList.remove('last-in-row');
+			}
+		}
+
+		if (forceTabsWrapMultiLine !== undefined) {
+			updateTabsWrapping(forceTabsWrapMultiLine);
 		}
 
 		// Setting enabled: selectively enable wrapping if possible
-		if (this.groupsView.partOptions.wrapTabs) {
+		else if (this.groupsView.partOptions.wrapTabs) {
 			const visibleTabsWidth = tabsContainer.offsetWidth;
 			const allTabsWidth = tabsContainer.scrollWidth;
-			const lastTabFitsWrapped = () => {
+			const tabsFitWrapped = () => {
 				const lastTab = this.getLastTab();
 				if (!lastTab) {
 					return true; // no tab always fits
 				}
 
-				const lastTabOverlapWithToolbarWidth = lastTab.offsetWidth + editorToolbarContainer.offsetWidth - dimensions.available.width;
+				const lastItem = this.addTabContainer && !this.addTabContainer.classList.contains('hidden') ? this.addTabContainer : lastTab;
+				const availableWidth = tabsWrapMultiLine ? Math.min(tabsContainer.offsetWidth, getContentWidth(tabsAndActionsContainer), dimensions.available.width) : dimensions.available.width;
+				let requiredWidth = lastItem === lastTab ? 0 : getTotalWidth(lastItem) + (tabsWrapMultiLine ? 0 : editorToolbarWidth());
+				this.forEachTab((_editor, _index, tab) => {
+					const toolbarReserve = !tabsWrapMultiLine && tab === lastTab && lastItem === lastTab ? editorToolbarWidth() : 0;
+					const totalWidth = getTotalWidth(tab);
+					const margin = totalWidth - tab.offsetWidth;
+					const modernFit = tab.classList.contains('sizing-fit') && !!this.parent.closest('.modern-ui-tabs');
+					const width = modernFit
+						? Math.min(tab.offsetWidth, Math.max(MultiEditorTabsControl.TAB_WIDTH.shrink, availableWidth - margin - toolbarReserve))
+						: tab.offsetWidth;
+					requiredWidth = Math.max(requiredWidth, width + margin + toolbarReserve);
+				});
+				const lastTabOverlapWithToolbarWidth = requiredWidth - availableWidth;
 				if (lastTabOverlapWithToolbarWidth > 1) {
 					// Allow for slight rounding errors related to zooming here
 					// https://github.com/microsoft/vscode/issues/116385
@@ -1759,20 +2307,20 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			// accordingly based on the number of actions. The margin is important to
 			// properly position the last tab apart from the actions
 			//
-			// We already check here if the last tab would fit when wrapped given the
+			// We already check here if the tabs would fit when wrapped given the
 			// editor toolbar will also show right next to it. This ensures we are not
 			// enabling wrapping only to disable it again in the code below (this fixes
 			// flickering issue https://github.com/microsoft/vscode/issues/115050)
-			if (tabsWrapMultiLine || (allTabsWidth > visibleTabsWidth && lastTabFitsWrapped())) {
+			if (tabsWrapMultiLine || (allTabsWidth > visibleTabsWidth && tabsFitWrapped())) {
 				updateTabsWrapping(true);
 			}
 
 			// Tabs wrap multiline: remove wrapping under certain size constraint conditions
 			if (tabsWrapMultiLine) {
 				if (
-					(tabsContainer.offsetHeight > dimensions.available.height) ||							// if height exceeds available height
+					(tabsAndActionsContainer.offsetHeight > dimensions.available.height) ||				// if the complete wrapped title exceeds available height
 					(allTabsWidth === visibleTabsWidth && tabsContainer.offsetHeight === this.tabHeight) ||	// if wrapping is not needed anymore
-					(!lastTabFitsWrapped())																	// if last tab does not fit anymore
+					(!tabsFitWrapped())																		// if a tab or the trailing controls do not fit anymore
 				) {
 					updateTabsWrapping(false);
 				}
@@ -1810,6 +2358,9 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			let currentTabsPosY: number | undefined = undefined;
 			let lastTab: HTMLElement | undefined = undefined;
 			for (const child of tabsContainer.children) {
+				if (child === this.addTabContainer) {
+					continue;
+				}
 				const tab = child as HTMLElement;
 				const tabPosY = tab.offsetTop;
 
@@ -1841,13 +2392,90 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		return tabsWrapMultiLine;
 	}
 
+	/**
+	 * When wrapped tabs leave the Add Tab control alone on the last row, moves the last tab down next to it, so that the
+	 * control never forms a row of its own. This needs the last tab, the control and the editor toolbar to fit on one
+	 * row; otherwise the control stays on its own row. Applied after the wrapping layout, which it does not change.
+	 */
+	private layoutAddTabWithLastTab(tabsWrapMultiLine: boolean): void {
+		const [tabsAndActionsContainer, tabsContainer, editorToolbarsContainer] = [this.tabsAndActionsContainer, this.tabsContainer, this.editorToolbarsContainer];
+		const addTabContainer = this.addTabContainer;
+		const lastTab = this.getLastTab();
+		if (!tabsWrapMultiLine || !tabsAndActionsContainer || !tabsContainer || !editorToolbarsContainer || !addTabContainer || addTabContainer.classList.contains('hidden') || !lastTab || lastTab.offsetTop === addTabContainer.offsetTop) {
+			return;
+		}
+
+		// Without following, the last tab has just its gutter as end margin
+		const gutter = Number.parseFloat(getWindow(lastTab).getComputedStyle(lastTab).marginInlineEnd) || 0;
+		// Fit tabs of the modern UI shrink to make room, see their maximum width
+		const modernFit = lastTab.classList.contains('sizing-fit') && !!this.parent.closest('.modern-ui-tabs');
+		const tabWidth = modernFit ? Math.min(lastTab.offsetWidth, MultiEditorTabsControl.TAB_WIDTH.shrink) : lastTab.offsetWidth;
+		const rowWidth = tabWidth + gutter * 2 + addTabContainer.offsetWidth + editorToolbarsContainer.offsetWidth;
+		if (rowWidth > Math.min(tabsContainer.offsetWidth, getContentWidth(tabsAndActionsContainer))) {
+			return;
+		}
+
+		tabsAndActionsContainer.classList.add('add-tab-follows-last-tab');
+		if (lastTab.offsetTop !== addTabContainer.offsetTop) {
+			tabsAndActionsContainer.classList.remove('add-tab-follows-last-tab'); // they still do not fit on one row
+			return;
+		}
+
+		// The tab before the last tab now ends its row
+		const tabs: HTMLElement[] = [];
+		this.forEachTab((_editor, _index, tab) => tabs.push(tab));
+		const lastInRow = tabs.map((tab, index) => index === tabs.length - 1 || tabs[index + 1].offsetTop !== tab.offsetTop);
+		tabs.forEach((tab, index) => tab.classList.toggle('last-in-row', lastInRow[index]));
+	}
+
+	private updateWrappedAddTabAlignment(tabsWrapMultiLine: boolean): void {
+		const addTabContainer = this.addTabContainer;
+		const editorToolbarsContainer = this.editorToolbarsContainer;
+		const tabsContainer = this.tabsContainer;
+		if (!addTabContainer || !editorToolbarsContainer || !tabsContainer) {
+			return;
+		}
+
+		const tabs: HTMLElement[] = [];
+		this.forEachTab((_editor, _index, tab) => tabs.push(tab));
+		const addTabTop = addTabContainer.offsetTop;
+		const precedingRowTop = Math.max(...tabs.map(tab => tab.offsetTop).filter(top => top < addTabTop));
+		const precedingRowTabs = tabs.filter(tab => tab.offsetTop === precedingRowTop);
+		const controlsOnlyRow = tabsWrapMultiLine && precedingRowTabs.length > 0 && tabs.every(tab => tab.offsetTop !== addTabTop);
+		addTabContainer.classList.toggle('controls-only-row', controlsOnlyRow);
+		if (!controlsOnlyRow) {
+			addTabContainer.style.removeProperty('--modern-ui-editor-tab-left-inset');
+			return;
+		}
+
+		addTabContainer.style.setProperty('--modern-ui-editor-tab-left-inset', '0px');
+		const targetWindow = getWindow(tabsContainer);
+		const rightToLeft = targetWindow.getComputedStyle(tabsContainer).direction === 'rtl';
+		const leadingTab = precedingRowTabs.reduce((leading, tab) => {
+			const bounds = tab.getBoundingClientRect();
+			const leadingBounds = leading.getBoundingClientRect();
+			return rightToLeft ? bounds.right > leadingBounds.right ? tab : leading : bounds.left < leadingBounds.left ? tab : leading;
+		});
+		const leadingTabStyle = targetWindow.getComputedStyle(leadingTab);
+		const desiredInset = Number.parseFloat(rightToLeft ? leadingTabStyle.paddingRight : leadingTabStyle.paddingLeft);
+		const tabsBounds = tabsContainer.getBoundingClientRect();
+		const addTabBounds = addTabContainer.getBoundingClientRect();
+		const toolbarBounds = editorToolbarsContainer.getBoundingClientRect();
+		const scale = tabsContainer.offsetWidth > 0 ? tabsBounds.width / tabsContainer.offsetWidth : 1;
+		const backingEndInset = Number.parseFloat(targetWindow.getComputedStyle(addTabContainer, '::before').getPropertyValue('inset-inline-end'));
+		const backingOverflow = Number.isFinite(backingEndInset) ? Math.max(0, -backingEndInset) : 0;
+		const availableInset = (rightToLeft ? addTabBounds.left - toolbarBounds.right : toolbarBounds.left - addTabBounds.right) / scale - backingOverflow;
+		const effectiveInset = Math.min(desiredInset, Math.max(0, availableInset));
+		addTabContainer.style.setProperty('--modern-ui-editor-tab-left-inset', `${effectiveInset}px`);
+	}
+
 	private doLayoutTabsNonWrapping(options?: IMultiEditorTabsControlLayoutOptions): void {
-		const [tabsContainer, tabsScrollbar] = assertAllDefined(this.tabsContainer, this.tabsScrollbar);
+		const [tabsContainer, tabsScrollbar] = assertReturnsAllDefined(this.tabsContainer, this.tabsScrollbar);
 
 		//
 		// Synopsis
 		// - allTabsWidth:   			sum of all tab widths
-		// - stickyTabsWidth:			sum of all sticky tab widths (unless `pinnedTabSizing: normal`)
+		// - stickyTabsWidth:			sum of all sticky tab slot widths (unless `pinnedTabSizing: normal`)
 		// - visibleContainerWidth: 	size of tab container
 		// - availableContainerWidth: 	size of tab container minus size of sticky tabs
 		//
@@ -1862,24 +2490,23 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 		const visibleTabsWidth = tabsContainer.offsetWidth;
 		const allTabsWidth = tabsContainer.scrollWidth;
+		const visibleEditorTabsWidth = visibleTabsWidth - (this.parent.closest(CONNECTED_EDITOR_TABS_SELECTOR) ? this.addTabContainer?.offsetWidth ?? 0 : 0);
 
-		// Compute width of sticky tabs depending on pinned tab sizing
-		// - compact: sticky-tabs * TAB_SIZES.compact
-		// -  shrink: sticky-tabs * TAB_SIZES.shrink
+		// Compute slot width of sticky tabs depending on pinned tab sizing
+		// - compact: sticky-tabs * compact slot width
+		// -  shrink: sticky-tabs * shrink slot width
 		// -  normal: 0 (sticky tabs inherit look and feel from non-sticky tabs)
 		let stickyTabsWidth = 0;
 		if (this.tabsModel.stickyCount > 0) {
-			let stickyTabWidth = 0;
-			switch (this.groupsView.partOptions.pinnedTabSizing) {
-				case 'compact':
-					stickyTabWidth = MultiEditorTabsControl.TAB_WIDTH.compact;
-					break;
-				case 'shrink':
-					stickyTabWidth = MultiEditorTabsControl.TAB_WIDTH.shrink;
-					break;
-			}
+			const stickyTabWidth = this.getStickyTabWidth(this.groupsView.partOptions.pinnedTabSizing);
 
-			stickyTabsWidth = this.tabsModel.stickyCount * stickyTabWidth;
+			for (let tabIndex = 0; tabIndex < this.tabsModel.stickyCount; tabIndex++) {
+				const tab = this.getTabAtIndex(tabIndex);
+				if (tab) {
+					tab.style.left = `${stickyTabsWidth}px`;
+				}
+				stickyTabsWidth += this.connectedTabLabels && stickyTabWidth > 0 && tab ? tab.offsetWidth : stickyTabWidth;
+			}
 		}
 
 		const activeTabAndIndex = this.tabsModel.activeEditor ? this.getTabAndIndex(this.tabsModel.activeEditor) : undefined;
@@ -1892,15 +2519,53 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		// Special case: we have sticky tabs but the available space for showing tabs
 		// is little enough that we need to disable sticky tabs sticky positioning
 		// so that tabs can be scrolled at naturally.
-		let availableTabsContainerWidth = visibleTabsWidth - stickyTabsWidth;
+		let availableTabsContainerWidth = visibleEditorTabsWidth - stickyTabsWidth;
 		if (this.tabsModel.stickyCount > 0 && availableTabsContainerWidth < MultiEditorTabsControl.TAB_WIDTH.fit) {
 			tabsContainer.classList.add('disable-sticky-tabs');
 
-			availableTabsContainerWidth = visibleTabsWidth;
+			availableTabsContainerWidth = visibleEditorTabsWidth;
 			stickyTabsWidth = 0;
 			activeTabPositionStatic = false;
 		} else {
 			tabsContainer.classList.remove('disable-sticky-tabs');
+		}
+		assertReturnsDefined(this.stickyTabsBackground).style.width = `${stickyTabsWidth}px`;
+		this.connectedTabOverflowEdge?.classList.toggle('connected-tab-adjacent-sticky', stickyTabsWidth > 0);
+
+		this.clearConnectedTabClipping();
+		const activeTabFill = activeTab?.firstElementChild;
+		const overflowEdge = this.connectedTabOverflowEdge;
+		overflowEdge?.classList.toggle('connected-tab-top-row', !!activeTab?.classList.contains('connected-tab-top-row'));
+		if (activeTab && !activeTab.classList.contains('connected-tab-upper-row') && isHTMLElement(activeTabFill) && overflowEdge && !activeTabPositionStatic && this.parent.closest(CONNECTED_EDITOR_TABS_SELECTOR)) {
+			// DOM bounds reflect native scroll clamping before the custom scrollbar dimensions update.
+			const scrollLeft = tabsContainer.scrollLeft;
+			const tabsBounds = tabsContainer.getBoundingClientRect();
+			const fillBounds = activeTabFill.getBoundingClientRect();
+			const scrollableBounds = tabsScrollbar.getDomNode().getBoundingClientRect();
+			const targetWindow = getWindow(activeTabFill);
+			overflowEdge.style.setProperty('--modern-ui-connected-tab-border', targetWindow.getComputedStyle(activeTab).getPropertyValue('--modern-ui-connected-tab-border'));
+			const edgeStyle = targetWindow.getComputedStyle(assertReturnsDefined(activeTabFill.nextElementSibling));
+			overflowEdge.classList.toggle('connected-tab-square-left', edgeStyle.borderTopLeftRadius === '0px');
+			overflowEdge.style.setProperty('--modern-ui-connected-tab-overflow-top-border', edgeStyle.borderTopColor);
+			overflowEdge.style.setProperty('--modern-ui-connected-tab-overflow-top-background', edgeStyle.backgroundImage);
+			// DOM rectangles include CSS zoom; scroll offsets and viewport widths do not.
+			const scale = visibleTabsWidth > 0 ? tabsBounds.width / visibleTabsWidth : 1;
+			const fillLeft = (fillBounds.left - tabsBounds.left) / scale + scrollLeft;
+			const viewportRight = visibleEditorTabsWidth;
+			overflowEdge.style.top = `${(fillBounds.top - scrollableBounds.top) / scale}px`;
+			overflowEdge.style.right = `${visibleTabsWidth - viewportRight}px`;
+			overflowEdge.style.bottom = `${(scrollableBounds.bottom - fillBounds.bottom) / scale}px`;
+			overflowEdge.style.left = `${stickyTabsWidth}px`;
+			this.connectedTabBounds = {
+				tab: activeTab,
+				overflowEdge,
+				fillLeft,
+				fillRight: (fillBounds.right - tabsBounds.left) / scale + scrollLeft,
+				viewportLeft: stickyTabsWidth,
+				viewportRight,
+				shoulderExtent: Number.parseFloat(targetWindow.getComputedStyle(activeTabFill, '::after').width),
+			};
+			this.updateConnectedTabOverflowHover();
 		}
 
 		let activeTabPosX: number | undefined;
@@ -1917,6 +2582,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 			width: visibleTabsWidth,
 			scrollWidth: allTabsWidth
 		});
+		this.updateConnectedTabClipping(tabsScrollbar.getScrollPosition().scrollLeft);
 		const dimensionsChanged = oldVisibleTabsWidth !== visibleTabsWidth || oldAllTabsWidth !== allTabsWidth;
 
 		// Revealing the active tab is skipped under some conditions:
@@ -1933,8 +2599,17 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 		// Reveal the active one
 		const tabsContainerScrollPosX = tabsScrollbar.getScrollPosition().scrollLeft;
-		const activeTabFits = activeTabWidth <= availableTabsContainerWidth;
-		const adjustedActiveTabPosX = activeTabPosX - stickyTabsWidth;
+		const activeTabShoulderWidth = this.connectedTabBounds?.shoulderExtent ?? 0;
+		const previousTab = this.connectedTabBounds?.tab.previousElementSibling;
+		const activeTabLeftShoulderWidth = previousTab && !previousTab.classList.contains('last-in-row') ? activeTabShoulderWidth : 0;
+		// Round outwards so fractional bounds cannot leave either shoulder clipped.
+		const adjustedActiveTabPosX = (this.connectedTabBounds
+			? Math.floor(this.connectedTabBounds.fillLeft - activeTabLeftShoulderWidth)
+			: activeTabPosX) - stickyTabsWidth;
+		const activeTabRight = this.connectedTabBounds
+			? Math.ceil(this.connectedTabBounds.fillRight + activeTabShoulderWidth) + (this.connectedTabBounds.tab.classList.contains('connected-tab-last') ? 1 : 0) - stickyTabsWidth
+			: adjustedActiveTabPosX + activeTabWidth;
+		const activeTabFits = activeTabRight - adjustedActiveTabPosX <= availableTabsContainerWidth;
 
 		//
 		// Synopsis
@@ -1957,9 +2632,9 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		//     [-- Sticky Tabs Width --]
 		//
 		//
-		if (activeTabFits && tabsContainerScrollPosX + availableTabsContainerWidth < adjustedActiveTabPosX + activeTabWidth) {
+		if (activeTabFits && tabsContainerScrollPosX + availableTabsContainerWidth < activeTabRight) {
 			tabsScrollbar.setScrollPosition({
-				scrollLeft: tabsContainerScrollPosX + ((adjustedActiveTabPosX + activeTabWidth) /* right corner of tab */ - (tabsContainerScrollPosX + availableTabsContainerWidth) /* right corner of view port */)
+				scrollLeft: tabsContainerScrollPosX + (activeTabRight - (tabsContainerScrollPosX + availableTabsContainerWidth))
 			});
 		}
 
@@ -1985,8 +2660,86 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		}
 	}
 
+	private getStickyTabWidth(pinnedTabSizing: IEditorPartOptions['pinnedTabSizing']): number {
+		const hasModernUITabs = Boolean(this.parent.closest('.modern-ui-tabs'));
+
+		switch (pinnedTabSizing) {
+			case 'compact':
+				return hasModernUITabs ? MultiEditorTabsControl.MODERN_UI_COMPACT_PINNED_TAB_WIDTH : MultiEditorTabsControl.TAB_WIDTH.compact;
+			case 'shrink':
+				return MultiEditorTabsControl.TAB_WIDTH.shrink;
+			default:
+				return 0;
+		}
+	}
+
+	private clearConnectedTabClipping(): void {
+		clearConnectedTabClipping(this.connectedTabBounds?.tab, this.connectedTabOverflowEdge);
+		this.connectedTabOverflowEdge?.classList.remove('connected-tab-square-left');
+		this.connectedTabOverflowEdge?.style.removeProperty('--modern-ui-connected-tab-border');
+		this.connectedTabOverflowEdge?.style.removeProperty('--modern-ui-connected-tab-overflow-top-border');
+		this.connectedTabOverflowEdge?.style.removeProperty('--modern-ui-connected-tab-overflow-top-background');
+		this.connectedTabBounds = undefined;
+		this.forEachTab((_editor, _index, tab) => {
+			tab.style.removeProperty('clip-path');
+			tab.classList.remove('connected-tab-add-clipped');
+		});
+	}
+
+	private updateConnectedTabClipping(scrollLeft: number): void {
+		const terminalTab = this.getLastTab();
+		if (this.addTabContainer && this.addTabContainer.offsetWidth > 0 && this.tabsContainer && terminalTab && this.parent.closest(CONNECTED_EDITOR_TABS_SELECTOR) && !this.tabsAndActionsContainer?.classList.contains('wrapping')) {
+			const tabsBounds = this.tabsContainer.getBoundingClientRect();
+			const addBounds = this.addTabContainer.getBoundingClientRect();
+			const scale = this.tabsContainer.offsetWidth > 0 ? tabsBounds.width / this.tabsContainer.offsetWidth : 1;
+			const rtl = getWindow(this.tabsContainer).getComputedStyle(this.tabsContainer).direction === 'rtl';
+			const shoulderSpace = Number.parseFloat(getWindow(terminalTab).getComputedStyle(terminalTab).marginInlineEnd);
+			const viewportEdge = rtl ? addBounds.right + shoulderSpace * scale : addBounds.left - shoulderSpace * scale;
+			const clipping: { tab: HTMLElement; clipped: number }[] = [];
+			this.forEachTab((_editor, _index, tab) => {
+				const bounds = tab.getBoundingClientRect();
+				clipping.push({ tab, clipped: Math.max(0, (rtl ? viewportEdge - bounds.left : bounds.right - viewportEdge) / scale) });
+			});
+			if (this.connectedTabBounds) {
+				const activeLeft = this.connectedTabBounds.tab.getBoundingClientRect().left;
+				const leftShoulderFits = activeLeft - this.connectedTabBounds.shoulderExtent * scale >= addBounds.right;
+				const viewportLeft = rtl
+					? Math.max(this.connectedTabBounds.viewportLeft, ((leftShoulderFits ? addBounds.right : viewportEdge) - tabsBounds.left) / scale)
+					: this.connectedTabBounds.viewportLeft;
+				const viewportRight = rtl ? this.tabsContainer.offsetWidth : (addBounds.left - tabsBounds.left) / scale;
+				this.connectedTabBounds.overflowEdge.style.left = `${viewportLeft}px`;
+				this.connectedTabBounds.overflowEdge.style.right = `${this.tabsContainer.offsetWidth - viewportRight}px`;
+				updateConnectedTabClipping({ ...this.connectedTabBounds, viewportLeft, viewportRight }, scrollLeft);
+			}
+			const shoulderInset = 'calc(-1 * (var(--modern-ui-connected-tab-shoulder-radius) + var(--vscode-strokeThickness)))';
+			for (const { tab, clipped } of clipping) {
+				// Retain the natural shoulder only when it fits entirely before Add Tab.
+				const shoulderFits = tab.classList.contains('active') && this.connectedTabBounds && clipped + this.connectedTabBounds.shoulderExtent <= shoulderSpace;
+				const inset = clipped - (shoulderFits ? shoulderSpace : 0);
+				tab.style.clipPath = clipped > 0 ? `inset(calc(-1 * var(--vscode-strokeThickness)) ${rtl ? shoulderInset : `${inset}px`} calc(-1 * var(--vscode-strokeThickness)) ${rtl ? `${inset}px` : shoulderInset})` : '';
+				tab.classList.toggle('connected-tab-add-clipped', clipped > 0);
+			}
+		} else {
+			if (this.connectedTabBounds) {
+				const viewportRight = this.addTabContainer?.offsetWidth === 0 && this.tabsContainer ? this.tabsContainer.offsetWidth : this.connectedTabBounds.viewportRight;
+				this.connectedTabBounds.overflowEdge.style.left = `${this.connectedTabBounds.viewportLeft}px`;
+				this.connectedTabBounds.overflowEdge.style.right = `${this.tabsContainer ? this.tabsContainer.offsetWidth - viewportRight : 0}px`;
+				updateConnectedTabClipping({ ...this.connectedTabBounds, viewportRight }, scrollLeft);
+			}
+			this.forEachTab((_editor, _index, tab) => {
+				tab.style.removeProperty('clip-path');
+				tab.classList.remove('connected-tab-add-clipped');
+			});
+		}
+	}
+
+	private updateConnectedTabOverflowHover(): void {
+		const hoveredEditor = typeof this.hoveredTabIndex === 'number' ? this.tabsModel.getEditorByIndex(this.hoveredTabIndex) : undefined;
+		this.connectedTabOverflowEdge?.classList.toggle('connected-tab-hovered', !!hoveredEditor && this.groupView.isActive(hoveredEditor));
+	}
+
 	private updateTabsControlVisibility(): void {
-		const tabsAndActionsContainer = assertIsDefined(this.tabsAndActionsContainer);
+		const tabsAndActionsContainer = assertReturnsDefined(this.tabsAndActionsContainer);
 		tabsAndActionsContainer.classList.toggle('empty', !this.visible);
 
 		// Reset dimensions if hidden
@@ -2011,7 +2764,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 
 	private getTabAtIndex(tabIndex: number): HTMLElement | undefined {
 		if (tabIndex >= 0) {
-			const tabsContainer = assertIsDefined(this.tabsContainer);
+			const tabsContainer = assertReturnsDefined(this.tabsContainer);
 
 			return tabsContainer.children[tabIndex] as HTMLElement | undefined;
 		}
@@ -2047,10 +2800,10 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 	private async onDrop(e: DragEvent, targetTabIndex: number, tabsContainer: HTMLElement): Promise<void> {
 		EventHelper.stop(e, true);
 
-		this.updateDropFeedback(tabsContainer, false);
+		this.updateDropFeedback(tabsContainer, false, e, targetTabIndex);
 		tabsContainer.classList.remove('scroll');
 
-		const targetEditorIndex = this.tabsModel instanceof UnstickyEditorGroupModel ? targetTabIndex + this.groupView.stickyCount : targetTabIndex;
+		let targetEditorIndex = this.tabsModel instanceof UnstickyEditorGroupModel ? targetTabIndex + this.groupView.stickyCount : targetTabIndex;
 		const options: IEditorOptions = {
 			sticky: this.tabsModel instanceof StickyEditorGroupModel && this.tabsModel.stickyCount === targetEditorIndex,
 			index: targetEditorIndex
@@ -2059,11 +2812,21 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		// Check for group transfer
 		if (this.groupTransfer.hasData(DraggedEditorGroupIdentifier.prototype)) {
 			const data = this.groupTransfer.getData(DraggedEditorGroupIdentifier.prototype);
-			if (Array.isArray(data)) {
+			if (Array.isArray(data) && data.length > 0) {
 				const sourceGroup = this.editorPartsView.getGroup(data[0].identifier);
 				if (sourceGroup) {
+					const copy = !this.isMoveOperation(e, sourceGroup.id);
+
+					// Into another part only when all its editors can go there, before anything is merged or focused
+					const veto = sourceGroup.groupsView !== this.groupsView ? getGroupTransferVeto(sourceGroup, this.groupView.id, { copy }) : undefined;
+					if (veto) {
+						this.groupTransfer.clearData(DraggedEditorGroupIdentifier.prototype);
+						this.editorPartsView.showTransferVeto(veto);
+						return;
+					}
+
 					const mergeGroupOptions: IMergeGroupOptions = { index: targetEditorIndex };
-					if (!this.isMoveOperation(e, sourceGroup.id)) {
+					if (copy) {
 						mergeGroupOptions.mode = MergeGroupMode.COPY_EDITORS;
 					}
 
@@ -2078,31 +2841,46 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		// Check for editor transfer
 		else if (this.editorTransfer.hasData(DraggedEditorIdentifier.prototype)) {
 			const data = this.editorTransfer.getData(DraggedEditorIdentifier.prototype);
-			if (Array.isArray(data)) {
-				const draggedEditor = data[0].identifier;
-				const sourceGroup = this.editorPartsView.getGroup(draggedEditor.groupId);
+			if (Array.isArray(data) && data.length > 0) {
+				const sourceGroup = this.editorPartsView.getGroup(data[0].identifier.groupId);
 				if (sourceGroup) {
+					for (const de of data) {
+						const editor = de.identifier.editor;
 
-					// Move editor to target position and index
-					if (this.isMoveOperation(e, draggedEditor.groupId, draggedEditor.editor)) {
-						sourceGroup.moveEditor(draggedEditor.editor, this.groupView, options);
-					}
+						// Only allow moving/copying from a single group source
+						if (sourceGroup.id !== de.identifier.groupId) {
+							continue;
+						}
 
-					// Copy editor to target position and index
-					else {
-						sourceGroup.copyEditor(draggedEditor.editor, this.groupView, options);
+						// Keep the same order when moving / copying editors within the same group
+						const sourceEditorIndex = sourceGroup.getIndexOfEditor(editor);
+						if (sourceGroup === this.groupView && sourceEditorIndex < targetEditorIndex) {
+							targetEditorIndex--;
+						}
+
+						if (this.isMoveOperation(e, de.identifier.groupId, editor)) {
+							sourceGroup.moveEditor(editor, this.groupView, { ...options, index: targetEditorIndex });
+
+							if (this.tabsModel instanceof UnstickyEditorGroupModel && this.groupView.isSticky(editor)) {
+								this.groupView.unstickEditor(editor);
+							}
+						} else {
+							sourceGroup.copyEditor(editor, this.groupView, { ...options, index: targetEditorIndex });
+						}
+
+						targetEditorIndex++;
 					}
 				}
-
-				this.groupView.focus();
-				this.editorTransfer.clearData(DraggedEditorIdentifier.prototype);
 			}
+
+			this.groupView.focus();
+			this.editorTransfer.clearData(DraggedEditorIdentifier.prototype);
 		}
 
 		// Check for tree items
 		else if (this.treeItemsTransfer.hasData(DraggedTreeItemsIdentifier.prototype)) {
 			const data = this.treeItemsTransfer.getData(DraggedTreeItemsIdentifier.prototype);
-			if (Array.isArray(data)) {
+			if (Array.isArray(data) && data.length > 0) {
 				const editors: IUntypedEditorInput[] = [];
 				for (const id of data) {
 					const dataTransferItem = await this.treeViewsDragAndDropService.removeDragOperationTransfer(id.identifier);
@@ -2121,7 +2899,7 @@ export class MultiEditorTabsControl extends EditorTabsControl {
 		// Check for URI transfer
 		else {
 			const dropHandler = this.instantiationService.createInstance(ResourcesDropHandler, { allowWorkspaceOpen: false });
-			dropHandler.handleDrop(e, getWindow(this.titleContainer), () => this.groupView, () => this.groupView.focus(), options);
+			dropHandler.handleDrop(e, getWindow(this.parent), () => this.groupView, () => this.groupView.focus(), options);
 		}
 	}
 
@@ -2154,12 +2932,17 @@ registerThemingParticipant((theme, collector) => {
 				outline-offset: -5px;
 			}
 
+			.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.selected:not(.active):not(:hover)  {
+				outline: 1px dotted;
+				outline-offset: -5px;
+			}
+
 			.monaco-workbench .part.editor > .content .editor-group-container.active > .title .tabs-container > .tab.active:focus {
 				outline-style: dashed;
 			}
 
 			.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.active {
-				outline: 1px dotted;
+				outline: 1px dashed;
 				outline-offset: -5px;
 			}
 
@@ -2168,11 +2951,11 @@ registerThemingParticipant((theme, collector) => {
 				outline-offset: -5px;
 			}
 
-			.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.active > .tab-actions .action-label,
-			.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.active:hover > .tab-actions .action-label,
-			.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.dirty > .tab-actions .action-label,
-			.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab.sticky > .tab-actions .action-label,
-			.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab:hover > .tab-actions .action-label {
+			.monaco-workbench:not(.modern-ui-tabs) .part.editor > .content .editor-group-container > .title .tabs-container > .tab.active > .tab-actions .action-label,
+			.monaco-workbench:not(.modern-ui-tabs) .part.editor > .content .editor-group-container > .title .tabs-container > .tab.active:hover > .tab-actions .action-label,
+			.monaco-workbench:not(.modern-ui-tabs) .part.editor > .content .editor-group-container > .title .tabs-container > .tab.dirty > .tab-actions .action-label,
+			.monaco-workbench:not(.modern-ui-tabs) .part.editor > .content .editor-group-container > .title .tabs-container > .tab.sticky > .tab-actions .action-label,
+			.monaco-workbench:not(.modern-ui-tabs) .part.editor > .content .editor-group-container > .title .tabs-container > .tab:hover > .tab-actions .action-label {
 				opacity: 1 !important;
 			}
 		`);
@@ -2192,7 +2975,7 @@ registerThemingParticipant((theme, collector) => {
 	const tabHoverBackground = theme.getColor(TAB_HOVER_BACKGROUND);
 	if (tabHoverBackground) {
 		collector.addRule(`
-			.monaco-workbench .part.editor > .content .editor-group-container.active > .title .tabs-container > .tab:hover  {
+			.monaco-workbench .part.editor > .content .editor-group-container.active > .title .tabs-container > .tab:not(.selected):hover {
 				background-color: ${tabHoverBackground} !important;
 			}
 		`);
@@ -2201,7 +2984,7 @@ registerThemingParticipant((theme, collector) => {
 	const tabUnfocusedHoverBackground = theme.getColor(TAB_UNFOCUSED_HOVER_BACKGROUND);
 	if (tabUnfocusedHoverBackground) {
 		collector.addRule(`
-			.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab:hover  {
+			.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab:not(.selected):hover  {
 				background-color: ${tabUnfocusedHoverBackground} !important;
 			}
 		`);
@@ -2211,7 +2994,7 @@ registerThemingParticipant((theme, collector) => {
 	const tabHoverForeground = theme.getColor(TAB_HOVER_FOREGROUND);
 	if (tabHoverForeground) {
 		collector.addRule(`
-			.monaco-workbench .part.editor > .content .editor-group-container.active > .title .tabs-container > .tab:hover  {
+			.monaco-workbench .part.editor > .content .editor-group-container.active > .title .tabs-container > .tab:not(.selected):hover  {
 				color: ${tabHoverForeground} !important;
 			}
 		`);
@@ -2220,7 +3003,7 @@ registerThemingParticipant((theme, collector) => {
 	const tabUnfocusedHoverForeground = theme.getColor(TAB_UNFOCUSED_HOVER_FOREGROUND);
 	if (tabUnfocusedHoverForeground) {
 		collector.addRule(`
-			.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab:hover  {
+			.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab:not(.selected):hover  {
 				color: ${tabUnfocusedHoverForeground} !important;
 			}
 		`);
@@ -2235,7 +3018,7 @@ registerThemingParticipant((theme, collector) => {
 	if (tabHoverBorder) {
 		collector.addRule(`
 			.monaco-workbench .part.editor > .content .editor-group-container.active > .title .tabs-container > .tab:hover > .tab-border-bottom-container {
-				display: block;
+				display: var(--editor-tab-border-indicator-display, block);
 				position: absolute;
 				left: 0;
 				pointer-events: none;
@@ -2252,7 +3035,7 @@ registerThemingParticipant((theme, collector) => {
 	if (tabUnfocusedHoverBorder) {
 		collector.addRule(`
 			.monaco-workbench .part.editor > .content .editor-group-container > .title .tabs-container > .tab:hover > .tab-border-bottom-container  {
-				display: block;
+				display: var(--editor-tab-border-indicator-display, block);
 				position: absolute;
 				left: 0;
 				pointer-events: none;

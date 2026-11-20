@@ -9,8 +9,6 @@ use std::{
 	path::{Path, PathBuf},
 };
 
-use lazy_static::lazy_static;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -33,21 +31,17 @@ pub enum RequestedVersion {
 	Path(String),
 }
 
-lazy_static! {
-	static ref COMMIT_RE: Regex = Regex::new(r"^[a-e0-f]{40}$").unwrap();
-}
-
 impl RequestedVersion {
 	pub fn get_command(&self) -> String {
 		match self {
 			RequestedVersion::Default => {
-				format!("code version use {}", QUALITY)
+				format!("code version use {QUALITY}")
 			}
 			RequestedVersion::Commit(commit) => {
-				format!("code version use {}/{}", QUALITY, commit)
+				format!("code version use {QUALITY}/{commit}")
 			}
 			RequestedVersion::Path(path) => {
-				format!("code version use {}", path)
+				format!("code version use {path}")
 			}
 		}
 	}
@@ -57,12 +51,12 @@ impl std::fmt::Display for RequestedVersion {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			RequestedVersion::Default => {
-				write!(f, "{}", QUALITY)
+				write!(f, "{QUALITY}")
 			}
 			RequestedVersion::Commit(commit) => {
-				write!(f, "{}/{}", QUALITY, commit)
+				write!(f, "{QUALITY}/{commit}")
 			}
-			RequestedVersion::Path(path) => write!(f, "{}", path),
+			RequestedVersion::Path(path) => write!(f, "{path}"),
 		}
 	}
 }
@@ -79,7 +73,7 @@ impl TryFrom<&str> for RequestedVersion {
 			return Ok(RequestedVersion::Path(s.to_string()));
 		}
 
-		if COMMIT_RE.is_match(s) {
+		if s.len() == 40 && s.bytes().all(|byte| byte.is_ascii_hexdigit()) {
 			return Ok(RequestedVersion::Commit(s.to_string()));
 		}
 
@@ -222,17 +216,14 @@ impl CodeVersionManager {
 /// Shows a nice UI prompt to users asking them if they want to install the
 /// requested version.
 pub fn prompt_to_install(version: &RequestedVersion) {
-	println!(
-		"No installation of {} {} was found.",
-		QUALITYLESS_PRODUCT_NAME, version
-	);
+	println!("No installation of {QUALITYLESS_PRODUCT_NAME} {version} was found.");
 
 	if let RequestedVersion::Default = version {
 		if let Some(uri) = PRODUCT_DOWNLOAD_URL {
 			// todo: on some platforms, we may be able to help automate installation. For example,
 			// we can unzip the app ourselves on macOS and on windows we can download and spawn the GUI installer
 			#[cfg(target_os = "linux")]
-			println!("Install it from your system's package manager or {}, restart your shell, and try again.", uri);
+			println!("Install it from your system's package manager or {uri}, restart your shell, and try again.");
 			#[cfg(target_os = "macos")]
 			println!("Download and unzip it from {} and try again.", uri);
 			#[cfg(target_os = "windows")]
@@ -443,11 +434,35 @@ mod tests {
 	}
 
 	#[test]
+	fn test_commit_matching() {
+		for (value, expected) in [
+			("0123456789abcdefABCDEF0123456789abcdefAB".to_owned(), true),
+			("a".repeat(39), false),
+			("a".repeat(40), true),
+			("a".repeat(41), false),
+			(format!("{}g", "a".repeat(39)), false),
+			(format!("{}\n", "a".repeat(40)), false),
+			(format!("{}é", "a".repeat(38)), false),
+			("ａ".repeat(40), false),
+			(String::new(), false),
+		] {
+			assert_eq!(
+				matches!(
+					RequestedVersion::try_from(value.as_str()),
+					Ok(RequestedVersion::Commit(_))
+				),
+				expected,
+				"{value:?}"
+			);
+		}
+	}
+
+	#[test]
 	fn test_detect_installed_program() {
 		// developers can run this test and debug output manually; VS Code will not
 		// be installed in CI, so the test only makes sure it doesn't error out
 		let result = detect_installed_program(&log::Logger::test());
-		println!("result: {:?}", result);
+		println!("result: {result:?}");
 		assert!(result.is_ok());
 	}
 

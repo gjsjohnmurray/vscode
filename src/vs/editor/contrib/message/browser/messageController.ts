@@ -3,25 +3,26 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { renderMarkdown } from 'vs/base/browser/markdownRenderer';
-import { alert } from 'vs/base/browser/ui/aria/aria';
-import { Event } from 'vs/base/common/event';
-import { IMarkdownString, isMarkdownString } from 'vs/base/common/htmlContent';
-import { KeyCode } from 'vs/base/common/keyCodes';
-import { DisposableStore, IDisposable, MutableDisposable } from 'vs/base/common/lifecycle';
-import 'vs/css!./messageController';
-import { ContentWidgetPositionPreference, ICodeEditor, IContentWidget, IContentWidgetPosition } from 'vs/editor/browser/editorBrowser';
-import { EditorCommand, EditorContributionInstantiation, registerEditorCommand, registerEditorContribution } from 'vs/editor/browser/editorExtensions';
-import { IPosition } from 'vs/editor/common/core/position';
-import { Range } from 'vs/editor/common/core/range';
-import { IEditorContribution, ScrollType } from 'vs/editor/common/editorCommon';
-import { PositionAffinity } from 'vs/editor/common/model';
-import { openLinkFromMarkdown } from 'vs/editor/contrib/markdownRenderer/browser/markdownRenderer';
-import * as nls from 'vs/nls';
-import { IContextKey, IContextKeyService, RawContextKey } from 'vs/platform/contextkey/common/contextkey';
-import { KeybindingWeight } from 'vs/platform/keybinding/common/keybindingsRegistry';
-import { IOpenerService } from 'vs/platform/opener/common/opener';
-import * as dom from 'vs/base/browser/dom';
+import { renderMarkdown } from '../../../../base/browser/markdownRenderer.js';
+import { alert } from '../../../../base/browser/ui/aria/aria.js';
+import { Event } from '../../../../base/common/event.js';
+import { IMarkdownString, isMarkdownString } from '../../../../base/common/htmlContent.js';
+import { KeyCode } from '../../../../base/common/keyCodes.js';
+import { DisposableStore, IDisposable, MutableDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
+import './messageController.css';
+import { ContentWidgetPositionPreference, ICodeEditor, IContentWidget, IContentWidgetPosition } from '../../../browser/editorBrowser.js';
+import { getEditorMarkdownSanitizerConfig } from '../../../browser/editorMarkdownSanitizer.js';
+import { EditorCommand, EditorContributionInstantiation, registerEditorCommand, registerEditorContribution } from '../../../browser/editorExtensions.js';
+import { IPosition } from '../../../common/core/position.js';
+import { Range } from '../../../common/core/range.js';
+import { IEditorContribution, ScrollType } from '../../../common/editorCommon.js';
+import { PositionAffinity } from '../../../common/model.js';
+import { openLinkFromMarkdown } from '../../../../platform/markdown/browser/markdownRenderer.js';
+import * as nls from '../../../../nls.js';
+import { IContextKey, IContextKeyService, RawContextKey } from '../../../../platform/contextkey/common/contextkey.js';
+import { KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
+import { IOpenerService } from '../../../../platform/opener/common/opener.js';
+import * as dom from '../../../../base/browser/dom.js';
 
 export class MessageController implements IEditorContribution {
 
@@ -37,7 +38,6 @@ export class MessageController implements IEditorContribution {
 	private readonly _visible: IContextKey<boolean>;
 	private readonly _messageWidget = new MutableDisposable<MessageWidget>();
 	private readonly _messageListeners = new DisposableStore();
-	private _message: { element: HTMLElement; dispose: () => void } | undefined;
 	private _mouseOverMessage: boolean = false;
 
 	constructor(
@@ -51,7 +51,6 @@ export class MessageController implements IEditorContribution {
 	}
 
 	dispose(): void {
-		this._message?.dispose();
 		this._messageListeners.dispose();
 		this._messageWidget.dispose();
 		this._visible.reset();
@@ -68,13 +67,19 @@ export class MessageController implements IEditorContribution {
 		this._visible.set(true);
 		this._messageWidget.clear();
 		this._messageListeners.clear();
-		this._message = isMarkdownString(message) ? renderMarkdown(message, {
-			actionHandler: {
-				callback: (url) => openLinkFromMarkdown(this._openerService, url, isMarkdownString(message) ? message.isTrusted : undefined),
-				disposables: this._messageListeners
-			},
-		}) : undefined;
-		this._messageWidget.value = new MessageWidget(this._editor, position, typeof message === 'string' ? message : this._message!.element);
+
+		if (isMarkdownString(message)) {
+			const renderedMessage = this._messageListeners.add(renderMarkdown(message, {
+				sanitizerConfig: getEditorMarkdownSanitizerConfig(this._editor),
+				actionHandler: (url, mdStr) => {
+					this.closeMessage();
+					openLinkFromMarkdown(this._openerService, url, mdStr.isTrusted);
+				},
+			}));
+			this._messageWidget.value = new MessageWidget(this._editor, position, renderedMessage.element);
+		} else {
+			this._messageWidget.value = new MessageWidget(this._editor, position, message);
+		}
 
 		// close on blur (debounced to allow to tab into the message), cursor, model change, dispose
 		this._messageListeners.add(Event.debounce(this._editor.onDidBlurEditorText, (last, event) => event, 0)(() => {
@@ -116,8 +121,10 @@ export class MessageController implements IEditorContribution {
 	closeMessage(): void {
 		this._visible.reset();
 		this._messageListeners.clear();
-		if (this._messageWidget.value) {
-			this._messageListeners.add(MessageWidget.fadeOut(this._messageWidget.value));
+		// Hand the widget over to the fade out so it isn't retained after it went away
+		const messageWidget = this._messageWidget.clearAndLeak();
+		if (messageWidget) {
+			this._messageListeners.add(MessageWidget.fadeOut(messageWidget));
 		}
 	}
 }
@@ -146,15 +153,15 @@ class MessageWidget implements IContentWidget {
 	private readonly _domNode: HTMLDivElement;
 
 	static fadeOut(messageWidget: MessageWidget): IDisposable {
-		const dispose = () => {
-			messageWidget.dispose();
-			clearTimeout(handle);
-			messageWidget.getDomNode().removeEventListener('animationend', dispose);
-		};
-		const handle = setTimeout(dispose, 110);
-		messageWidget.getDomNode().addEventListener('animationend', dispose);
+		// Everything that references the widget lives in the store, which is emptied once the
+		// fade out completes, so holding on to the returned disposable doesn't keep it alive
+		const store = new DisposableStore();
+		store.add(toDisposable(() => messageWidget.dispose()));
+		store.add(dom.addDisposableListener(messageWidget.getDomNode(), 'animationend', () => store.dispose()));
+		const handle = setTimeout(() => store.dispose(), 110);
+		store.add(toDisposable(() => clearTimeout(handle)));
 		messageWidget.getDomNode().classList.add('fadeOut');
-		return { dispose };
+		return store;
 	}
 
 	constructor(editor: ICodeEditor, { lineNumber, column }: IPosition, text: HTMLElement | string) {

@@ -4,10 +4,13 @@
 		"If you want to provide a fix or improvement, please create a pull request against the original repository.",
 		"Once accepted there, we are happy to receive an update request."
 	],
-	"version": "https://github.com/dotnet/csharp-tmLanguage/commit/6666eb1d5e6fb565a4110d6db645cc534fb3c6d2",
+	"version": "https://github.com/dotnet/csharp-tmLanguage/commit/61acf50cb1c7fcac8097249983dddfba56023608",
 	"name": "C#",
 	"scopeName": "source.cs",
 	"patterns": [
+		{
+			"include": "#hover"
+		},
 		{
 			"include": "#preprocessor"
 		},
@@ -25,6 +28,536 @@
 		}
 	],
 	"repository": {
+		"hover": {
+			"begin": "\\A\\u200B",
+			"name": "meta.hover.cs",
+			"end": "(?!)",
+			"patterns": [
+				{
+					"match": "(?x)\n\\G\\s*\\([^(),]*\\)\\s* |\n\\G\\s*\\([^(),]+,[^(),]+\\)\n(?=\\s+(?:\n  @?[_[:alpha:]][_[:alnum:]]*\n  (?:\\s*(?:\\.|::)\\s*@?[_[:alpha:]][_[:alnum:]]*)*\n  (?<args><(?:[^<>]|\\g<args>)*>)?[\\[\\]?*]*\\s |\n  \\(\n))",
+					"name": "meta.hover.annotation.cs"
+				},
+				{
+					"match": "\\(\\+\\s*\\d+[^()]*\\)",
+					"name": "meta.hover.annotation.cs"
+				},
+				{
+					"match": "<global\\s+namespace>",
+					"name": "meta.hover.placeholder.cs"
+				},
+				{
+					"begin": "\\b(namespace)\\b",
+					"beginCaptures": {
+						"1": {
+							"name": "storage.type.namespace.cs"
+						}
+					},
+					"end": "(?!)",
+					"patterns": [
+						{
+							"match": "@?[_[:alpha:]][_[:alnum:]]*",
+							"name": "entity.name.type.namespace.cs"
+						},
+						{
+							"include": "#punctuation-accessor"
+						}
+					]
+				},
+				{
+					"begin": "\\b(class|struct|interface|enum|record|union)\\b",
+					"beginCaptures": {
+						"1": {
+							"name": "storage.type.$1.cs"
+						}
+					},
+					"end": "(?!)",
+					"patterns": [
+						{
+							"include": "#hover-constraints"
+						},
+						{
+							"match": "\\b(class|struct)\\b",
+							"name": "storage.type.$1.cs"
+						},
+						{
+							"include": "#storage-modifier"
+						},
+						{
+							"include": "#hover-parameters"
+						},
+						{
+							"include": "#hover-type"
+						},
+						{
+							"match": ":",
+							"name": "punctuation.separator.colon.cs"
+						}
+					]
+				},
+				{
+					"begin": "\\b(delegate)\\b(?!\\s*\\*)",
+					"beginCaptures": {
+						"1": {
+							"name": "storage.type.delegate.cs"
+						}
+					},
+					"end": "(?!)",
+					"patterns": [
+						{
+							"include": "#hover-constraints"
+						},
+						{
+							"include": "#hover-parameters"
+						},
+						{
+							"include": "#hover-type"
+						}
+					]
+				},
+				{
+					"begin": "(?x)\n(?<=\\u200B)\n(?<constructor>\n  @?[_[:alpha:]][_[:alnum:]]*\n  (?<args><(?:[^<>]|\\g<args>)*>)?\n  (?:\\s*(?:\\.|::)\\s*@?[_[:alpha:]][_[:alnum:]]*\\g<args>?)*\n)\\s*(?=\\()",
+					"beginCaptures": {
+						"1": {
+							"patterns": [
+								{
+									"include": "#hover-type"
+								}
+							]
+						}
+					},
+					"end": "(?<=\\))",
+					"patterns": [
+						{
+							"include": "#hover-parameters"
+						}
+					]
+				},
+				{
+					"begin": "\\b(event)\\b",
+					"beginCaptures": {
+						"1": {
+							"name": "storage.type.event.cs"
+						}
+					},
+					"end": "(?!)",
+					"patterns": [
+						{
+							"match": "@?[_[:alpha:]][_[:alnum:]]*(?=\\s*(?:$|\\{))",
+							"name": "entity.name.variable.event.cs"
+						},
+						{
+							"include": "#hover-type"
+						}
+					]
+				},
+				{
+					"match": "(?x)\n(@?[_[:alpha:]][_[:alnum:]]*)\n(?=\\s*(?<args><(?:[^<>]|\\g<args>)*>)?\\s*\\.\\s*\n  (?!@?[_[:alpha:]][_[:alnum:]]*\\([^()]*\\)\\.)\n  @?[_[:alpha:]][_[:alnum:]]*\\s*\\g<args>?\\s*\\()",
+					"captures": {
+						"1": {
+							"patterns": [
+								{
+									"include": "#type-builtin"
+								},
+								{
+									"match": "@?[_[:alpha:]][_[:alnum:]]*",
+									"name": "entity.name.type.cs"
+								}
+							]
+						}
+					}
+				},
+				{
+					"include": "#hover-constraints"
+				},
+				{
+					"begin": "\\b(implicit|explicit)\\s+(operator)\\b(?:\\s+(checked))?",
+					"beginCaptures": {
+						"1": {
+							"name": "storage.modifier.$1.cs"
+						},
+						"2": {
+							"name": "storage.type.operator.cs"
+						},
+						"3": {
+							"name": "keyword.control.context.checked.cs"
+						}
+					},
+					"end": "(?<=\\))",
+					"patterns": [
+						{
+							"include": "#hover-parameters"
+						},
+						{
+							"include": "#hover-type"
+						}
+					]
+				},
+				{
+					"begin": "\\b(operator)\\b\\s*(?:(checked)\\s*)?([^\\s(]+)",
+					"beginCaptures": {
+						"1": {
+							"name": "storage.type.operator.cs"
+						},
+						"2": {
+							"name": "keyword.control.context.checked.cs"
+						},
+						"3": {
+							"name": "entity.name.function.cs"
+						}
+					},
+					"end": "(?<=\\))",
+					"patterns": [
+						{
+							"include": "#hover-parameters"
+						}
+					]
+				},
+				{
+					"begin": "(@?[_[:alpha:]][_[:alnum:]]*)(?=\\([^()]*\\)\\.)",
+					"beginCaptures": {
+						"1": {
+							"name": "meta.hover.qualifier.cs"
+						}
+					},
+					"end": "(?<=\\))",
+					"patterns": [
+						{
+							"include": "#hover-type"
+						}
+					]
+				},
+				{
+					"begin": "(?x)\n(@?[_[:alpha:]][_[:alnum:]]*)\n(?<args><(?:[^<>]|\\g<args>)*>)?\n\\s*(?=\\()",
+					"beginCaptures": {
+						"1": {
+							"name": "entity.name.function.cs"
+						},
+						"2": {
+							"patterns": [
+								{
+									"include": "#hover-type-arguments"
+								}
+							]
+						}
+					},
+					"end": "(?<=\\))",
+					"patterns": [
+						{
+							"include": "#hover-parameters"
+						}
+					]
+				},
+				{
+					"begin": "\\b(this)\\s*(?=\\[)",
+					"beginCaptures": {
+						"1": {
+							"name": "entity.name.variable.property.cs"
+						}
+					},
+					"end": "(?<=\\])",
+					"patterns": [
+						{
+							"begin": "\\[",
+							"beginCaptures": {
+								"0": {
+									"name": "punctuation.squarebracket.open.cs"
+								}
+							},
+							"end": "\\]",
+							"endCaptures": {
+								"0": {
+									"name": "punctuation.squarebracket.close.cs"
+								}
+							},
+							"patterns": [
+								{
+									"include": "#hover-parameter"
+								}
+							]
+						}
+					]
+				},
+				{
+					"match": "@?[_[:alpha:]][_[:alnum:]]*(?=\\s*\\{)",
+					"name": "entity.name.variable.property.cs"
+				},
+				{
+					"match": "\\b(get|set|init|add|remove)\\b",
+					"name": "storage.type.accessor.$1.cs"
+				},
+				{
+					"include": "#storage-modifier"
+				},
+				{
+					"include": "#type-builtin"
+				},
+				{
+					"match": "@?[_[:alpha:]][_[:alnum:]]*(?=\\s*(?:=|$))",
+					"name": "variable.other.readwrite.cs"
+				},
+				{
+					"include": "#hover-default"
+				},
+				{
+					"include": "#hover-type"
+				},
+				{
+					"match": "\\{",
+					"name": "punctuation.curlybrace.open.cs"
+				},
+				{
+					"match": "\\}",
+					"name": "punctuation.curlybrace.close.cs"
+				},
+				{
+					"include": "#punctuation-semicolon"
+				}
+			]
+		},
+		"hover-constraints": {
+			"begin": "\\b(where)\\b",
+			"beginCaptures": {
+				"1": {
+					"name": "storage.modifier.where.cs"
+				}
+			},
+			"end": "$",
+			"patterns": [
+				{
+					"match": "\\b(class|struct)\\b",
+					"name": "storage.type.$1.cs"
+				},
+				{
+					"match": "\\b(notnull|unmanaged|default)\\b",
+					"name": "keyword.other.constraint.$1.cs"
+				},
+				{
+					"match": "\\b(new)\\b",
+					"name": "keyword.operator.expression.new.cs"
+				},
+				{
+					"match": "\\b(allows|ref)\\b",
+					"name": "storage.modifier.$1.cs"
+				},
+				{
+					"include": "#hover-type"
+				},
+				{
+					"match": ":",
+					"name": "punctuation.separator.colon.cs"
+				}
+			]
+		},
+		"hover-parameters": {
+			"begin": "\\(",
+			"beginCaptures": {
+				"0": {
+					"name": "punctuation.parenthesis.open.cs"
+				}
+			},
+			"end": "\\)",
+			"endCaptures": {
+				"0": {
+					"name": "punctuation.parenthesis.close.cs"
+				}
+			},
+			"patterns": [
+				{
+					"include": "#hover-parameter"
+				}
+			]
+		},
+		"hover-parameter": {
+			"patterns": [
+				{
+					"include": "#hover-default"
+				},
+				{
+					"begin": "\\[",
+					"beginCaptures": {
+						"0": {
+							"name": "punctuation.squarebracket.open.cs"
+						}
+					},
+					"end": "\\]",
+					"endCaptures": {
+						"0": {
+							"name": "punctuation.squarebracket.close.cs"
+						}
+					},
+					"patterns": [
+						{
+							"include": "#hover-parameter"
+						}
+					]
+				},
+				{
+					"include": "#storage-modifier"
+				},
+				{
+					"match": "@?[_[:alpha:]][_[:alnum:]]*(?=\\s*(?:[,)=\\]]|$))",
+					"name": "entity.name.variable.parameter.cs"
+				},
+				{
+					"include": "#hover-type"
+				}
+			]
+		},
+		"hover-default": {
+			"begin": "=",
+			"beginCaptures": {
+				"0": {
+					"name": "keyword.operator.assignment.cs"
+				}
+			},
+			"end": "(?=[,)\\]]|$)",
+			"patterns": [
+				{
+					"include": "#expression"
+				}
+			]
+		},
+		"hover-type": {
+			"patterns": [
+				{
+					"include": "#ref-modifier"
+				},
+				{
+					"include": "#readonly-modifier"
+				},
+				{
+					"match": "\\b(in|out|scoped)\\b",
+					"name": "storage.modifier.$1.cs"
+				},
+				{
+					"match": "<anonymous\\s+delegate>",
+					"name": "meta.hover.placeholder.cs"
+				},
+				{
+					"begin": "\\b(delegate)\\s*(\\*)",
+					"beginCaptures": {
+						"1": {
+							"name": "storage.type.delegate.cs"
+						},
+						"2": {
+							"name": "punctuation.separator.asterisk.cs"
+						}
+					},
+					"end": "(?<=>)",
+					"patterns": [
+						{
+							"match": "\\b(unmanaged|managed)\\b",
+							"name": "storage.modifier.$1.cs"
+						},
+						{
+							"begin": "\\[",
+							"beginCaptures": {
+								"0": {
+									"name": "punctuation.squarebracket.open.cs"
+								}
+							},
+							"end": "\\]",
+							"endCaptures": {
+								"0": {
+									"name": "punctuation.squarebracket.close.cs"
+								}
+							},
+							"patterns": [
+								{
+									"include": "#hover-type"
+								}
+							]
+						},
+						{
+							"include": "#hover-type-arguments"
+						}
+					]
+				},
+				{
+					"match": "(?x)\n@?[_[:alpha:]][_[:alnum:]]*\n(?=\\s*(?<args><(?:[^<>]|\\g<args>)*>)?\\s*(?:\\.|::))",
+					"name": "meta.hover.qualifier.cs"
+				},
+				{
+					"include": "#type-builtin"
+				},
+				{
+					"include": "#hover-type-arguments"
+				},
+				{
+					"begin": "\\(",
+					"beginCaptures": {
+						"0": {
+							"name": "punctuation.parenthesis.open.cs"
+						}
+					},
+					"end": "\\)",
+					"endCaptures": {
+						"0": {
+							"name": "punctuation.parenthesis.close.cs"
+						}
+					},
+					"patterns": [
+						{
+							"match": "(?<=[_[:alnum:]>?\\]*])\\s+(@?[_[:alpha:]][_[:alnum:]]*)(?=\\s*[,)])",
+							"captures": {
+								"1": {
+									"name": "entity.name.variable.tuple-element.cs"
+								}
+							}
+						},
+						{
+							"include": "#hover-type"
+						}
+					]
+				},
+				{
+					"match": "'[[:alpha:]]+",
+					"name": "entity.name.type.cs"
+				},
+				{
+					"match": "@?[_[:alpha:]][_[:alnum:]]*",
+					"name": "entity.name.type.cs"
+				},
+				{
+					"include": "#type-array-suffix"
+				},
+				{
+					"include": "#type-nullable-suffix"
+				},
+				{
+					"include": "#type-pointer-suffix"
+				},
+				{
+					"include": "#punctuation-accessor"
+				},
+				{
+					"match": "::",
+					"name": "punctuation.separator.coloncolon.cs"
+				},
+				{
+					"include": "#punctuation-comma"
+				}
+			]
+		},
+		"hover-type-arguments": {
+			"begin": "<",
+			"beginCaptures": {
+				"0": {
+					"name": "punctuation.definition.typeparameters.begin.cs"
+				}
+			},
+			"end": ">",
+			"endCaptures": {
+				"0": {
+					"name": "punctuation.definition.typeparameters.end.cs"
+				}
+			},
+			"patterns": [
+				{
+					"include": "#hover-type"
+				}
+			]
+		},
 		"directives": {
 			"patterns": [
 				{
@@ -94,6 +627,9 @@
 					"include": "#struct-declaration"
 				},
 				{
+					"include": "#union-declaration"
+				},
+				{
 					"include": "#record-declaration"
 				},
 				{
@@ -119,7 +655,13 @@
 					"include": "#type-declarations"
 				},
 				{
+					"include": "#constructor-declaration"
+				},
+				{
 					"include": "#property-declaration"
+				},
+				{
+					"include": "#fixed-size-buffer-declaration"
 				},
 				{
 					"include": "#field-declaration"
@@ -132,9 +674,6 @@
 				},
 				{
 					"include": "#variable-initializer"
-				},
-				{
-					"include": "#constructor-declaration"
 				},
 				{
 					"include": "#destructor-declaration"
@@ -165,6 +704,9 @@
 					"include": "#comment"
 				},
 				{
+					"include": "#storage-modifier"
+				},
+				{
 					"include": "#property-declaration"
 				},
 				{
@@ -175,6 +717,9 @@
 				},
 				{
 					"include": "#method-declaration"
+				},
+				{
+					"include": "#operator-declaration"
 				},
 				{
 					"include": "#attribute-section"
@@ -232,7 +777,7 @@
 					"include": "#try-statement"
 				},
 				{
-					"include": "#checked-unchecked-statement"
+					"include": "#expression-operator-expression"
 				},
 				{
 					"include": "#context-control-statement"
@@ -327,6 +872,12 @@
 				},
 				{
 					"include": "#is-expression"
+				},
+				{
+					"include": "#boolean-literal"
+				},
+				{
+					"include": "#null-literal"
 				},
 				{
 					"include": "#anonymous-method-expression"
@@ -471,7 +1022,7 @@
 			]
 		},
 		"attribute-section": {
-			"begin": "(\\[)(assembly|module|field|event|method|param|property|return|type)?(\\:)?",
+			"begin": "(\\[)(assembly|module|field|event|method|param|property|return|typevar|type)?(\\:)?",
 			"beginCaptures": {
 				"1": {
 					"name": "punctuation.squarebracket.open.cs"
@@ -505,6 +1056,9 @@
 			"patterns": [
 				{
 					"include": "#type-name"
+				},
+				{
+					"include": "#type-arguments"
 				},
 				{
 					"include": "#attribute-arguments"
@@ -705,11 +1259,11 @@
 		},
 		"enum-declaration": {
 			"begin": "(?=\\benum\\b)",
-			"end": "(?<=\\})",
+			"end": "(?<=\\})|(?=;)",
 			"patterns": [
 				{
 					"begin": "(?=enum)",
-					"end": "(?=\\{)",
+					"end": "(?=\\{)|(?=;)",
 					"patterns": [
 						{
 							"include": "#comment"
@@ -796,7 +1350,7 @@
 		},
 		"interface-declaration": {
 			"begin": "(?=\\binterface\\b)",
-			"end": "(?<=\\})",
+			"end": "(?<=\\})|(?=;)",
 			"patterns": [
 				{
 					"begin": "(?x)\n(interface)\\b\\s+\n(@?[_[:alpha:]][_[:alnum:]]*)",
@@ -808,7 +1362,7 @@
 							"name": "entity.name.type.interface.cs"
 						}
 					},
-					"end": "(?=\\{)",
+					"end": "(?=\\{)|(?=;)",
 					"patterns": [
 						{
 							"include": "#comment"
@@ -974,6 +1528,66 @@
 				}
 			]
 		},
+		"union-declaration": {
+			"begin": "(?=\\bunion\\b)",
+			"end": "(?<=\\})|(?=;)",
+			"patterns": [
+				{
+					"begin": "(?x)\n(union)\\b\\s+\n(@?[_[:alpha:]][_[:alnum:]]*)",
+					"beginCaptures": {
+						"1": {
+							"name": "storage.type.union.cs"
+						},
+						"2": {
+							"name": "entity.name.type.union.cs"
+						}
+					},
+					"end": "(?=\\{)|(?=;)",
+					"patterns": [
+						{
+							"include": "#comment"
+						},
+						{
+							"include": "#type-parameter-list"
+						},
+						{
+							"include": "#parenthesized-type-list"
+						},
+						{
+							"include": "#base-types"
+						},
+						{
+							"include": "#generic-constraints"
+						}
+					]
+				},
+				{
+					"begin": "\\{",
+					"beginCaptures": {
+						"0": {
+							"name": "punctuation.curlybrace.open.cs"
+						}
+					},
+					"end": "\\}",
+					"endCaptures": {
+						"0": {
+							"name": "punctuation.curlybrace.close.cs"
+						}
+					},
+					"patterns": [
+						{
+							"include": "#class-or-struct-members"
+						}
+					]
+				},
+				{
+					"include": "#preprocessor"
+				},
+				{
+					"include": "#comment"
+				}
+			]
+		},
 		"type-parameter-list": {
 			"begin": "\\<",
 			"beginCaptures": {
@@ -1017,6 +1631,9 @@
 			"end": "(?=\\{|where|;)",
 			"patterns": [
 				{
+					"include": "#base-class-constructor-call"
+				},
+				{
 					"include": "#type"
 				},
 				{
@@ -1024,6 +1641,33 @@
 				},
 				{
 					"include": "#preprocessor"
+				}
+			]
+		},
+		"base-class-constructor-call": {
+			"begin": "(?x)\n(?:\n  (@?[_[:alpha:]][_[:alnum:]]*)\\s*(\\.)  # qualified name part\n)*\n(@?[_[:alpha:]][_[:alnum:]]*)\\s*        # type name\n(\n  <\n  (?<type_args>\n    [^<>()]|\n    \\((?:[^<>()]|<[^<>()]*>|\\([^<>()]*\\))*\\)|\n    <\\g<type_args>*>\n  )*\n  >\\s*\n)?                                      # optional type arguments\n(?=\\()                                  # followed by argument list",
+			"beginCaptures": {
+				"1": {
+					"name": "entity.name.type.cs"
+				},
+				"2": {
+					"name": "punctuation.accessor.cs"
+				},
+				"3": {
+					"name": "entity.name.type.cs"
+				},
+				"4": {
+					"patterns": [
+						{
+							"include": "#type-arguments"
+						}
+					]
+				}
+			},
+			"end": "(?<=\\))",
+			"patterns": [
+				{
+					"include": "#argument-list"
 				}
 			]
 		},
@@ -1051,6 +1695,18 @@
 					"match": "\\bstruct\\b"
 				},
 				{
+					"name": "keyword.other.constraint.default.cs",
+					"match": "\\bdefault\\b"
+				},
+				{
+					"name": "keyword.other.constraint.notnull.cs",
+					"match": "\\bnotnull\\b"
+				},
+				{
+					"name": "keyword.other.constraint.unmanaged.cs",
+					"match": "\\bunmanaged\\b"
+				},
+				{
 					"match": "(new)\\s*(\\()\\s*(\\))",
 					"captures": {
 						"1": {
@@ -1072,6 +1728,33 @@
 				},
 				{
 					"include": "#generic-constraints"
+				}
+			]
+		},
+		"fixed-size-buffer-declaration": {
+			"begin": "(?x)\n\\b(fixed)\\b\\s+\n(?<type_name>\n  (?:\n    (?:(?<identifier>@?[_[:alpha:]][_[:alnum:]]*)\\s*\\:\\:\\s*)? # alias-qualification\n    (?<name_and_type_args> # identifier + type arguments (if any)\n      \\g<identifier>\\s*\n      (?<type_args>\\s*<(?:[^<>]|\\g<type_args>)+>\\s*)?\n    )\n    (?:\\s*\\.\\s*\\g<name_and_type_args>)* # Are there any more names being dotted into?\n  )\n)\\s+\n(\\g<identifier>)\\s* # buffer name\n(?=\\[)",
+			"beginCaptures": {
+				"1": {
+					"name": "storage.modifier.fixed.cs"
+				},
+				"2": {
+					"patterns": [
+						{
+							"include": "#type"
+						}
+					]
+				},
+				"6": {
+					"name": "entity.name.variable.field.cs"
+				}
+			},
+			"end": "(?=;)",
+			"patterns": [
+				{
+					"include": "#bracketed-argument-list"
+				},
+				{
+					"include": "#comment"
 				}
 			]
 		},
@@ -1110,7 +1793,7 @@
 			]
 		},
 		"property-declaration": {
-			"begin": "(?x)\n\n# The negative lookahead below ensures that we don't match nested types\n# or other declarations as properties.\n(?![[:word:][:space:]]*\\b(?:class|interface|struct|enum|event)\\b)\n\n(?<return_type>\n  (?<type_name>\n    (?:\n      (?:ref\\s+(?:readonly\\s+)?)?   # ref return\n      (?:\n        (?:(?<identifier>@?[_[:alpha:]][_[:alnum:]]*)\\s*\\:\\:\\s*)? # alias-qualification\n        (?<name_and_type_args> # identifier + type arguments (if any)\n          \\g<identifier>\\s*\n          (?<type_args>\\s*<(?:[^<>]|\\g<type_args>)+>\\s*)?\n        )\n        (?:\\s*\\.\\s*\\g<name_and_type_args>)* | # Are there any more names being dotted into?\n        (?<tuple>\\s*\\((?:[^\\(\\)]|\\g<tuple>)+\\))\n      )\n      (?:\\s*\\?\\s*)? # nullable suffix?\n      (?:\\s* # array suffix?\n        \\[\n          (?:\\s*,\\s*)* # commata for multi-dimensional arrays\n        \\]\n        \\s*\n        (?:\\?)? # arrays can be nullable reference types\n        \\s*\n      )*\n    )\n  )\\s+\n)\n(?<interface_name>\\g<type_name>\\s*\\.\\s*)?\n(?<property_name>\\g<identifier>)\\s*\n(?=\\{|=>|//|/\\*|$)",
+			"begin": "(?x)\n\n# The negative lookahead below ensures that we don't match nested types\n# or other declarations as properties.\n(?![[:word:][:space:]]*\\b(?:class|interface|struct|union|enum|event)\\b)\n\n(?<return_type>\n  (?<type_name>\n    (?:\n      (?:ref\\s+(?:readonly\\s+)?)?   # ref return\n      (?:\n        (?:(?<identifier>@?[_[:alpha:]][_[:alnum:]]*)\\s*\\:\\:\\s*)? # alias-qualification\n        (?<name_and_type_args> # identifier + type arguments (if any)\n          \\g<identifier>\\s*\n          (?<type_args>\\s*<(?:[^<>]|\\g<type_args>)+>\\s*)?\n        )\n        (?:\\s*\\.\\s*\\g<name_and_type_args>)* | # Are there any more names being dotted into?\n        (?<tuple>\\s*\\((?:[^\\(\\)]|\\g<tuple>)+\\))\n      )\n      (?:\\s*\\?\\s*)? # nullable suffix?\n      (?:\\s* # array suffix?\n        \\[\n          (?:\\s*,\\s*)* # commata for multi-dimensional arrays\n        \\]\n        \\s*\n        (?:\\?)? # arrays can be nullable reference types\n        \\s*\n      )*\n    )\n  )\\s+\n)\n(?<interface_name>\\g<type_name>\\s*\\.\\s*)?\n(?<property_name>\\g<identifier>)\\s*\n(?=\\{|=>|//|/\\*|$)",
 			"beginCaptures": {
 				"1": {
 					"patterns": [
@@ -1281,10 +1964,13 @@
 					"match": "\\b(private|protected|internal)\\b"
 				},
 				{
-					"begin": "\\b(get)\\b\\s*(?=\\{|;|=>|//|/\\*|$)",
+					"begin": "(?:\\b(readonly)\\s+)?\\b(get)\\b\\s*(?=\\{|;|=>|//|/\\*|$)",
 					"beginCaptures": {
 						"1": {
-							"name": "storage.type.accessor.$1.cs"
+							"name": "storage.modifier.readonly.cs"
+						},
+						"2": {
+							"name": "storage.type.accessor.get.cs"
 						}
 					},
 					"end": "(?<=\\}|;)|(?=\\})",
@@ -1490,17 +2176,14 @@
 			]
 		},
 		"constructor-declaration": {
-			"begin": "(?=@?[_[:alpha:]][_[:alnum:]]*\\s*\\()",
+			"begin": "(@?[_[:alpha:]][_[:alnum:]]*)\\s*(?=\\(|$)",
+			"beginCaptures": {
+				"1": {
+					"name": "entity.name.function.cs"
+				}
+			},
 			"end": "(?<=\\})|(?=;)",
 			"patterns": [
-				{
-					"match": "(@?[_[:alpha:]][_[:alnum:]]*)\\b",
-					"captures": {
-						"1": {
-							"name": "entity.name.function.cs"
-						}
-					}
-				},
 				{
 					"begin": "(:)",
 					"beginCaptures": {
@@ -2632,7 +3315,7 @@
 					},
 					"patterns": [
 						{
-							"begin": "\\G",
+							"begin": "(?=[^;\\)])",
 							"end": "(?=;|\\))",
 							"patterns": [
 								{
@@ -2640,6 +3323,15 @@
 								},
 								{
 									"include": "#local-variable-declaration"
+								},
+								{
+									"include": "#local-tuple-var-deconstruction"
+								},
+								{
+									"include": "#tuple-deconstruction-assignment"
+								},
+								{
+									"include": "#expression"
 								}
 							]
 						},
@@ -2695,22 +3387,25 @@
 							"include": "#intrusive"
 						},
 						{
-							"match": "(?x)\n(?:\n  (\\bvar\\b)|\n  (?<type_name>\n    (?:\n      (?:\n        (?:(?<identifier>@?[_[:alpha:]][_[:alnum:]]*)\\s*\\:\\:\\s*)? # alias-qualification\n        (?<name_and_type_args> # identifier + type arguments (if any)\n          \\g<identifier>\\s*\n          (?<type_args>\\s*<(?:[^<>]|\\g<type_args>)+>\\s*)?\n        )\n        (?:\\s*\\.\\s*\\g<name_and_type_args>)* | # Are there any more names being dotted into?\n        (?<tuple>\\s*\\((?:[^\\(\\)]|\\g<tuple>)+\\))\n      )\n      (?:\\s*\\?\\s*)? # nullable suffix?\n      (?:\\s* # array suffix?\n        \\[\n          (?:\\s*,\\s*)* # commata for multi-dimensional arrays\n        \\]\n        \\s*\n        (?:\\?)? # arrays can be nullable reference types\n        \\s*\n      )*\n    )\n  )\n)\\s+\n(\\g<identifier>)\\s+\n\\b(in)\\b",
+							"match": "(?x)\n(?:\n  (?:(\\bref)\\s+)?(\\bvar\\b)| # ref local\n  (?<type_name>\n    (?:\n      (?:ref\\s+)?   # ref local\n      (?:\n        (?:(?<identifier>@?[_[:alpha:]][_[:alnum:]]*)\\s*\\:\\:\\s*)? # alias-qualification\n        (?<name_and_type_args> # identifier + type arguments (if any)\n          \\g<identifier>\\s*\n          (?<type_args>\\s*<(?:[^<>]|\\g<type_args>)+>\\s*)?\n        )\n        (?:\\s*\\.\\s*\\g<name_and_type_args>)* | # Are there any more names being dotted into?\n        (?<tuple>\\s*\\((?:[^\\(\\)]|\\g<tuple>)+\\))\n      )\n      (?:\\s*\\?\\s*)? # nullable suffix?\n      (?:\\s* # array suffix?\n        \\[\n          (?:\\s*,\\s*)* # commata for multi-dimensional arrays\n        \\]\n        \\s*\n        (?:\\?)? # arrays can be nullable reference types\n        \\s*\n      )*\n    )\n  )\n)\\s+\n(\\g<identifier>)\\s+\n\\b(in)\\b",
 							"captures": {
 								"1": {
-									"name": "storage.type.var.cs"
+									"name": "storage.modifier.ref.cs"
 								},
 								"2": {
+									"name": "storage.type.var.cs"
+								},
+								"3": {
 									"patterns": [
 										{
 											"include": "#type"
 										}
 									]
 								},
-								"7": {
+								"8": {
 									"name": "entity.name.variable.local.cs"
 								},
-								"8": {
+								"9": {
 									"name": "keyword.control.loop.in.cs"
 								}
 							}
@@ -3021,11 +3716,14 @@
 				},
 				{
 					"include": "#local-tuple-var-deconstruction"
+				},
+				{
+					"include": "#local-tuple-declaration-deconstruction"
 				}
 			]
 		},
 		"local-variable-declaration": {
-			"begin": "(?x)\n(?:\n  (?:(\\bref)\\s+(?:(\\breadonly)\\s+)?)?(\\bvar\\b)| # ref local\n  (?<type_name>\n    (?:\n      (?:ref\\s+(?:readonly\\s+)?)?   # ref local\n      (?:\n        (?:(?<identifier>@?[_[:alpha:]][_[:alnum:]]*)\\s*\\:\\:\\s*)? # alias-qualification\n        (?<name_and_type_args> # identifier + type arguments (if any)\n          \\g<identifier>\\s*\n          (?<type_args>\\s*<(?:[^<>]|\\g<type_args>)+>\\s*)?\n        )\n        (?:\\s*\\.\\s*\\g<name_and_type_args>)* | # Are there any more names being dotted into?\n        (?<tuple>\\s*\\((?:[^\\(\\)]|\\g<tuple>)+\\))\n      )\n      (?:\\s*[?*]\\s*)? # nullable or pointer suffix?\n      (?:\\s* # array suffix?\n        \\[\n          (?:\\s*,\\s*)* # commata for multi-dimensional arrays\n        \\]\n        \\s*\n        (?:\\?)? # arrays can be nullable reference types\n        \\s*\n      )*\n    )\n  )\n)\\s+\n(\\g<identifier>)\\s*\n(?!=>)\n(?=,|;|=|\\))",
+			"begin": "(?x)\n(?:\n  (?:(\\bref)\\s+(?:(\\breadonly)\\s+)?)?(\\bvar\\b)| # ref local\n  (?<type_name>\n    (?:\n      (?:ref\\s+(?:readonly\\s+)?)?   # ref local\n      (?:\n        (?:(?<identifier>@?[_[:alpha:]][_[:alnum:]]*)\\s*\\:\\:\\s*)? # alias-qualification\n        (?<name_and_type_args> # identifier + type arguments (if any)\n          \\g<identifier>\\s*\n          (?<type_args>\\s*<(?:[^<>]|\\g<type_args>)+>\\s*)?\n        )\n        (?:\\s*\\.\\s*\\g<name_and_type_args>)* | # Are there any more names being dotted into?\n        (?<tuple>\\s*\\((?:[^\\(\\)]|\\g<tuple>)+\\))\n      )\n      (?:\\s*\\*\\s*)* # pointer suffix?\n      (?:\\s*\\?\\s*)? # nullable suffix?\n      (?:\\s* # array suffix?\n        \\[\n          (?:\\s*,\\s*)* # commata for multi-dimensional arrays\n        \\]\n        \\s*\n        (?:\\?)? # arrays can be nullable reference types\n        \\s*\n      )*\n    )\n  )\n)\\s+\n(\\g<identifier>)\\s*\n(?!=>)\n(?=,|;|=|\\))",
 			"beginCaptures": {
 				"1": {
 					"name": "storage.modifier.ref.cs"
@@ -3168,6 +3866,18 @@
 					"include": "#variable-initializer"
 				}
 			]
+		},
+		"local-tuple-declaration-deconstruction": {
+			"match": "(?x) # e.g. (int x, var y) = GetPoint();\n(?<tuple>\\((?:[^\\(\\)]|\\g<tuple>)+\\))\\s*\n(?!=>|==)(?==)",
+			"captures": {
+				"1": {
+					"patterns": [
+						{
+							"include": "#tuple-declaration-deconstruction-element-list"
+						}
+					]
+				}
+			}
 		},
 		"tuple-deconstruction-assignment": {
 			"match": "(?x)\n(?<tuple>\\s*\\((?:[^\\(\\)]|\\g<tuple>)+\\))\\s*\n(?!=>|==)(?==)",
@@ -3357,7 +4067,7 @@
 					"name": "punctuation.definition.string.begin.cs"
 				}
 			},
-			"end": "(\")|((?:[^\\\\\\n])$)",
+			"end": "(\")|((?:[^\\\\\\n\\{])$)",
 			"endCaptures": {
 				"1": {
 					"name": "punctuation.definition.string.end.cs"
@@ -3399,8 +4109,8 @@
 			]
 		},
 		"interpolation": {
-			"name": "meta.interpolation.cs",
-			"begin": "(?<=[^\\{]|^)((?:\\{\\{)*)(\\{)(?=[^\\{])",
+			"name": "meta.embedded.interpolation.cs",
+			"begin": "(?<=[^\\{]|^)((?:\\{\\{)*)(\\{)(?!\\{)",
 			"beginCaptures": {
 				"1": {
 					"name": "string.quoted.double.cs"
@@ -3554,8 +4264,8 @@
 			}
 		},
 		"raw-interpolation": {
-			"name": "meta.interpolation.cs",
-			"begin": "(?<=[^\\{]|^)((?:\\{)*)(\\{)(?=[^\\{])",
+			"name": "meta.embedded.interpolation.cs",
+			"begin": "(?<=[^\\{]|^)((?:\\{)*)(\\{)(?!\\{)",
 			"beginCaptures": {
 				"1": {
 					"name": "string.quoted.double.cs"
@@ -3577,8 +4287,8 @@
 			]
 		},
 		"double-raw-interpolation": {
-			"name": "meta.interpolation.cs",
-			"begin": "(?<=[^\\{][^\\{]|^)((?:\\{)*)(\\{\\{)(?=[^\\{])",
+			"name": "meta.embedded.interpolation.cs",
+			"begin": "(?<=[^\\{][^\\{]|^)((?:\\{)*)(\\{\\{)(?!\\{)",
 			"beginCaptures": {
 				"1": {
 					"name": "string.quoted.double.cs"
@@ -3824,7 +4534,7 @@
 		},
 		"char-character-escape": {
 			"name": "constant.character.escape.cs",
-			"match": "\\\\(['\"\\\\0abfnrtv]|x[0-9a-fA-F]{1,4}|u[0-9a-fA-F]{4})"
+			"match": "\\\\(x[0-9a-fA-F]{1,4}|u[0-9a-fA-F]{4}|.)"
 		},
 		"string-literal": {
 			"name": "string.quoted.double.cs",
@@ -3851,7 +4561,7 @@
 		},
 		"string-character-escape": {
 			"name": "constant.character.escape.cs",
-			"match": "\\\\(['\"\\\\0abfnrtv]|x[0-9a-fA-F]{1,4}|U[0-9a-fA-F]{8}|u[0-9a-fA-F]{4})"
+			"match": "\\\\(x[0-9a-fA-F]{1,4}|U[0-9a-fA-F]{8}|u[0-9a-fA-F]{4}|.)"
 		},
 		"verbatim-string-literal": {
 			"name": "string.quoted.double.cs",
@@ -4182,7 +4892,7 @@
 			]
 		},
 		"invocation-expression": {
-			"begin": "(?x)\n(?:\n  (?:(\\?)\\s*)?                                    # preceding null-conditional operator?\n  (\\.)\\s*|                                        # preceding dot?\n  (->)\\s*                                         # preceding pointer arrow?\n)?\n(@?[_[:alpha:]][_[:alnum:]]*)\\s*                  # method name\n(\n  <\n  (?<type_args>\n    [^<>()]++|\n    <\\g<type_args>*+>|\n    \\(\\g<type_args>*+\\)\n  )*+\n  >\\s*\n)?                                                # type arguments\n(?=\\()                                            # open paren of argument list",
+			"begin": "(?x)\n(?:\n  (?:(\\?)\\s*)?                                    # preceding null-conditional operator?\n  (\\.)\\s*|                                        # preceding dot?\n  (->)\\s*                                         # preceding pointer arrow?\n)?\n(@?[_[:alpha:]][_[:alnum:]]*)\\s*                  # method name\n(\n  <\n  (?<type_args>\n    [^<>()]|\n    \\((?:[^<>()]|<[^<>()]*>|\\([^<>()]*\\))*\\)|\n    <\\g<type_args>*>\n  )*\n  >\\s*\n)?                                                # type arguments\n(?=\\()                                            # open paren of argument list",
 			"beginCaptures": {
 				"1": {
 					"name": "keyword.operator.null-conditional.cs"
@@ -4331,7 +5041,7 @@
 			}
 		},
 		"array-creation-expression": {
-			"begin": "(?x)\n\\b(new|stackalloc)\\b\\s*\n(?<type_name>\n  (?:\n    (?:\n      (?:(?<identifier>@?[_[:alpha:]][_[:alnum:]]*)\\s*\\:\\:\\s*)? # alias-qualification\n      (?<name_and_type_args> # identifier + type arguments (if any)\n        \\g<identifier>\\s*\n        (?<type_args>\\s*<(?:[^<>]|\\g<type_args>)+>\\s*)?\n      )\n      (?:\\s*\\.\\s*\\g<name_and_type_args>)* | # Are there any more names being dotted into?\n      (?<tuple>\\s*\\((?:[^\\(\\)]|\\g<tuple>)+\\))\n    )\n    (?:\\s*\\?\\s*)? # nullable suffix?\n    (?:\\s* # array suffix?\n      \\[\n        (?:\\s*,\\s*)* # commata for multi-dimensional arrays\n      \\]\n      \\s*\n      (?:\\?)? # arrays can be nullable reference types\n      \\s*\n    )*\n  )\n)?\\s*\n(?=\\[)",
+			"begin": "(?x)\n\\b(new|stackalloc)\\b\\s*\n(?<type_name>\n  (?:\n    (?:\n      (?:(?<identifier>@?[_[:alpha:]][_[:alnum:]]*)\\s*\\:\\:\\s*)? # alias-qualification\n      (?<name_and_type_args> # identifier + type arguments (if any)\n        \\g<identifier>\\s*\n        (?<type_args>\\s*<(?:[^<>]|\\g<type_args>)+>\\s*)?\n      )\n      (?:\\s*\\.\\s*\\g<name_and_type_args>)* | # Are there any more names being dotted into?\n      (?<tuple>\\s*\\((?:[^\\(\\)]|\\g<tuple>)+\\))\n    )\n    (?:\\s*\\*\\s*)* # pointer suffix?\n    (?:\\s*\\?\\s*)? # nullable suffix?\n    (?:\\s* # array suffix?\n      \\[\n        (?:\\s*,\\s*)* # commata for multi-dimensional arrays\n      \\]\n      \\s*\n      (?:\\?)? # arrays can be nullable reference types\n      \\s*\n    )*\n  )\n)?\\s*\n(?=\\[)",
 			"beginCaptures": {
 				"1": {
 					"name": "keyword.operator.expression.$1.cs"
@@ -4433,6 +5143,31 @@
 				},
 				{
 					"include": "#variable-initializer"
+				}
+			]
+		},
+		"parenthesized-type-list": {
+			"begin": "(\\()",
+			"beginCaptures": {
+				"0": {
+					"name": "punctuation.parenthesis.open.cs"
+				}
+			},
+			"end": "(\\))",
+			"endCaptures": {
+				"0": {
+					"name": "punctuation.parenthesis.close.cs"
+				}
+			},
+			"patterns": [
+				{
+					"include": "#comment"
+				},
+				{
+					"include": "#type"
+				},
+				{
+					"include": "#punctuation-comma"
 				}
 			]
 		},
@@ -5180,7 +5915,7 @@
 			"end": "(?<=$)",
 			"patterns": [
 				{
-					"include": "#comment"
+					"include": "#preprocessor-comment"
 				},
 				{
 					"include": "#preprocessor-define-or-undef"
@@ -5214,6 +5949,32 @@
 				},
 				{
 					"include": "#preprocessor-pragma-checksum"
+				},
+				{
+					"include": "#preprocessor-app-directive"
+				}
+			]
+		},
+		"preprocessor-comment": {
+			"patterns": [
+				{
+					"name": "comment.line.double-slash.cs",
+					"match": "(//).*(?=$)",
+					"captures": {
+						"1": {
+							"name": "punctuation.definition.comment.cs"
+						}
+					}
+				},
+				{
+					"name": "comment.block.cs",
+					"begin": "/\\*",
+					"end": "\\*/",
+					"captures": {
+						"0": {
+							"name": "punctuation.definition.comment.cs"
+						}
+					}
 				}
 			]
 		},
@@ -5244,7 +6005,7 @@
 			"end": "(?=$)",
 			"patterns": [
 				{
-					"include": "#comment"
+					"include": "#preprocessor-comment"
 				},
 				{
 					"include": "#preprocessor-expression"
@@ -5420,6 +6181,171 @@
 				},
 				"5": {
 					"name": "string.quoted.double.cs"
+				}
+			}
+		},
+		"preprocessor-app-directive": {
+			"begin": "\\s*(:)\\s*",
+			"beginCaptures": {
+				"1": {
+					"name": "punctuation.separator.colon.cs"
+				}
+			},
+			"end": "(?=$)",
+			"patterns": [
+				{
+					"include": "#preprocessor-app-directive-package"
+				},
+				{
+					"include": "#preprocessor-app-directive-property"
+				},
+				{
+					"include": "#preprocessor-app-directive-exclude"
+				},
+				{
+					"include": "#preprocessor-app-directive-include"
+				},
+				{
+					"include": "#preprocessor-app-directive-project"
+				},
+				{
+					"include": "#preprocessor-app-directive-ref"
+				},
+				{
+					"include": "#preprocessor-app-directive-sdk"
+				},
+				{
+					"include": "#preprocessor-app-directive-generic"
+				}
+			]
+		},
+		"preprocessor-app-directive-package": {
+			"match": "\\b(package)\\b\\s*([_[:alpha:]][_.[:alnum:]]*)?(@)?(.*)?\\s*",
+			"captures": {
+				"1": {
+					"name": "keyword.preprocessor.package.cs"
+				},
+				"2": {
+					"patterns": [
+						{
+							"include": "#preprocessor-app-directive-package-name"
+						}
+					]
+				},
+				"3": {
+					"name": "punctuation.separator.at.cs"
+				},
+				"4": {
+					"name": "string.unquoted.preprocessor.message.cs"
+				}
+			}
+		},
+		"preprocessor-app-directive-property": {
+			"match": "\\b(property)\\b\\s*([_[:alpha:]][_[:alnum:]]*)?(=)?(.*)?\\s*",
+			"captures": {
+				"1": {
+					"name": "keyword.preprocessor.property.cs"
+				},
+				"2": {
+					"name": "entity.name.variable.preprocessor.symbol.cs"
+				},
+				"3": {
+					"name": "punctuation.separator.equals.cs"
+				},
+				"4": {
+					"name": "string.unquoted.preprocessor.message.cs"
+				}
+			}
+		},
+		"preprocessor-app-directive-exclude": {
+			"match": "\\b(exclude)\\b\\s*(.*)?\\s*",
+			"captures": {
+				"1": {
+					"name": "keyword.preprocessor.exclude.cs"
+				},
+				"2": {
+					"name": "string.unquoted.preprocessor.message.cs"
+				}
+			}
+		},
+		"preprocessor-app-directive-include": {
+			"match": "\\b(include)\\b\\s*(.*)?\\s*",
+			"captures": {
+				"1": {
+					"name": "keyword.preprocessor.include.cs"
+				},
+				"2": {
+					"name": "string.unquoted.preprocessor.message.cs"
+				}
+			}
+		},
+		"preprocessor-app-directive-project": {
+			"match": "\\b(project)\\b\\s*(.*)?\\s*",
+			"captures": {
+				"1": {
+					"name": "keyword.preprocessor.project.cs"
+				},
+				"2": {
+					"name": "string.unquoted.preprocessor.message.cs"
+				}
+			}
+		},
+		"preprocessor-app-directive-ref": {
+			"match": "\\b(ref)\\b\\s*(.*)?\\s*",
+			"captures": {
+				"1": {
+					"name": "keyword.preprocessor.ref.cs"
+				},
+				"2": {
+					"name": "string.unquoted.preprocessor.message.cs"
+				}
+			}
+		},
+		"preprocessor-app-directive-sdk": {
+			"match": "\\b(sdk)\\b\\s*([_[:alpha:]][_.[:alnum:]]*)?(@)?(.*)?\\s*",
+			"captures": {
+				"1": {
+					"name": "keyword.preprocessor.sdk.cs"
+				},
+				"2": {
+					"patterns": [
+						{
+							"include": "#preprocessor-app-directive-package-name"
+						}
+					]
+				},
+				"3": {
+					"name": "punctuation.separator.at.cs"
+				},
+				"4": {
+					"name": "string.unquoted.preprocessor.message.cs"
+				}
+			}
+		},
+		"preprocessor-app-directive-package-name": {
+			"patterns": [
+				{
+					"match": "(\\.)([_[:alpha:]][_[:alnum:]]*)",
+					"captures": {
+						"1": {
+							"name": "punctuation.dot.cs"
+						},
+						"2": {
+							"name": "entity.name.variable.preprocessor.symbol.cs"
+						}
+					}
+				},
+				{
+					"name": "entity.name.variable.preprocessor.symbol.cs",
+					"match": "[_[:alpha:]][_[:alnum:]]*"
+				}
+			]
+		},
+		"preprocessor-app-directive-generic": {
+			"match": "\\b(.*)?\\s*",
+			"captures": {
+				"1": {
+					"name": "string.unquoted.preprocessor.message.cs"
 				}
 			}
 		},

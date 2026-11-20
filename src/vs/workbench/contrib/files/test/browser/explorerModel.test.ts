@@ -3,16 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as assert from 'assert';
-import { isLinux, isWindows, OS } from 'vs/base/common/platform';
-import { URI } from 'vs/base/common/uri';
-import { join } from 'vs/base/common/path';
-import { validateFileName } from 'vs/workbench/contrib/files/browser/fileActions';
-import { ExplorerItem } from 'vs/workbench/contrib/files/common/explorerModel';
-import { toResource } from 'vs/base/test/common/utils';
-import { TestFileService, TestPathService } from 'vs/workbench/test/browser/workbenchTestServices';
-import { TestConfigurationService } from 'vs/platform/configuration/test/common/testConfigurationService';
-import { NullFilesConfigurationService } from 'vs/workbench/test/common/workbenchTestServices';
+import assert from 'assert';
+import { join } from '../../../../../base/common/path.js';
+import { isLinux, isWindows, OS } from '../../../../../base/common/platform.js';
+import { URI } from '../../../../../base/common/uri.js';
+import { ensureNoDisposablesAreLeakedInTestSuite, toResource } from '../../../../../base/test/common/utils.js';
+import { TestConfigurationService } from '../../../../../platform/configuration/test/common/testConfigurationService.js';
+import { TestPathService } from '../../../../test/browser/workbenchTestServices.js';
+import { NullFilesConfigurationService, TestFileService } from '../../../../test/common/workbenchTestServices.js';
+import { validateFileName } from '../../browser/fileActions.js';
+import { ExplorerItem } from '../../common/explorerModel.js';
 
 
 suite('Files - View Model', function () {
@@ -277,4 +277,32 @@ suite('Files - View Model', function () {
 		ExplorerItem.mergeLocalWithDisk(merge2, merge1);
 		assert.ok(existingChild === merge1.getChild(existingChild!.name));
 	});
+
+	test('getId reflects renames, moves and find filter marks', function () {
+		const d = new Date().getTime();
+		const root = createStat.call(this, '/root', 'root', true, false, 8096, d);
+		const otherRoot = createStat.call(this, '/other', 'other', true, false, 8096, d);
+		const folder = createStat.call(this, '/root/folder', 'folder', true, false, 8096, d);
+		const file = createStat.call(this, '/root/folder/file.txt', 'file.txt', false, false, 8096, d);
+		root.addChild(folder);
+		folder.addChild(file);
+
+		const ids = [file.getId()];
+		folder.rename({ name: 'renamed' });
+		ids.push(file.getId());
+		file.move(otherRoot);
+		ids.push(file.getId());
+		file.markItemAndParentsAsFiltered();
+		ids.push(file.getId());
+
+		const id = (rootPath: string, path: string) => `${toResource.call(this, rootPath).toString()}::${toResource.call(this, path).toString()}`;
+		assert.deepStrictEqual(ids, [
+			id('/root', '/root/folder/file.txt'),
+			id('/root', '/root/renamed/file.txt'),
+			id('/other', '/other/file.txt'),
+			`${id('/other', '/other/file.txt')}::findFilterResult`,
+		]);
+	});
+
+	ensureNoDisposablesAreLeakedInTestSuite();
 });

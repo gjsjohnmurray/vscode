@@ -3,15 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IContextMenuDelegate } from 'vs/base/browser/contextmenu';
-import { StandardMouseEvent } from 'vs/base/browser/mouseEvent';
-import { AnchorAlignment, AnchorAxisAlignment, IAnchor, IContextViewProvider } from 'vs/base/browser/ui/contextview/contextview';
-import { IAction } from 'vs/base/common/actions';
-import { Event } from 'vs/base/common/event';
-import { IDisposable } from 'vs/base/common/lifecycle';
-import { IMenuActionOptions, MenuId } from 'vs/platform/actions/common/actions';
-import { IContextKeyService } from 'vs/platform/contextkey/common/contextkey';
-import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
+import { IContextMenuDelegate } from '../../../base/browser/contextmenu.js';
+import { StandardMouseEvent } from '../../../base/browser/mouseEvent.js';
+import { AnchorAlignment, AnchorAxisAlignment, IAnchor, IContextViewCloseAnimation, IContextViewProvider, IContextViewRenderContext } from '../../../base/browser/ui/contextview/contextview.js';
+import { IAction } from '../../../base/common/actions.js';
+import { Event } from '../../../base/common/event.js';
+import { AnchorPosition } from '../../../base/common/layout.js';
+import { IDisposable } from '../../../base/common/lifecycle.js';
+import { IMenuActionOptions, MenuId } from '../../actions/common/actions.js';
+import { IContextKeyService } from '../../contextkey/common/contextkey.js';
+import { createDecorator } from '../../instantiation/common/instantiation.js';
 
 export const IContextViewService = createDecorator<IContextViewService>('contextViewService');
 
@@ -19,7 +20,7 @@ export interface IContextViewService extends IContextViewProvider {
 
 	readonly _serviceBrand: undefined;
 
-	showContextView(delegate: IContextViewDelegate, container?: HTMLElement, shadowRoot?: boolean): IDisposable;
+	showContextView(delegate: IContextViewDelegate, container?: HTMLElement, shadowRoot?: boolean, useWindowContainerForShadowRoot?: boolean): IOpenContextView;
 	hideContextView(data?: any): void;
 	getContextViewElement(): HTMLElement;
 	layout(): void;
@@ -37,12 +38,31 @@ export interface IContextViewDelegate {
 	 * or an `IAnchor` to position it at a specific location.
 	 */
 	getAnchor(): HTMLElement | StandardMouseEvent | IAnchor;
-	render(container: HTMLElement): IDisposable;
+	render(container: HTMLElement, context?: IContextViewRenderContext): IDisposable;
 	onDOMEvent?(e: any, activeElement: HTMLElement): void;
 	onHide?(data?: any): void;
+	closeAnimation?: IContextViewCloseAnimation;
 	focus?(): void;
+	layout?(): void;
 	anchorAlignment?: AnchorAlignment;
 	anchorAxisAlignment?: AnchorAxisAlignment;
+	anchorPosition?: AnchorPosition;
+
+	// context views with higher layers are rendered over contet views with lower layers
+	layer?: number; // Default: 0
+
+	/**
+	 * Host the view inside the container passed to `showContextView` (its owner)
+	 * as a popover in the top layer. Focus then stays inside the owner, and the
+	 * context view restores focus, isolates keys and dismisses on outside pointer
+	 * presses itself. Requires a container; falls back to a fixed position when
+	 * popovers are unavailable.
+	 */
+	hostAsPopover?: boolean;
+}
+
+export interface IOpenContextView {
+	close: () => void;
 }
 
 export const IContextMenuService = createDecorator<IContextMenuService>('contextMenuService');
